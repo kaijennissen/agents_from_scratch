@@ -1,25 +1,21 @@
-.DEFAULT_GOAL	:= help
-PROJECT_NAME	:=
-PYTHON_VERSION	:= 3.13
-PATH_TO_ROOT 	:= $(shell git rev-parse --show-toplevel)
+.DEFAULT_GOAL := help
 
 .PHONY: help
 help:  ## this help section
-	@awk 'BEGIN {FS = ":.*##"; printf "\nusage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nusage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-##@ Docker commands
-DOCKER_TAG := latest
-LOCAL_IMAGE_NAME := your_project_name:$(DOCKER_TAG)
+.PHONY: lint
+lint:  ## ruff lint checks
+	uv run ruff check .
 
-.PHONY: build
-build: ## Build the Docker image locally.
-	docker build \
-		--tag $(LOCAL_IMAGE_NAME) \
-		--file Dockerfile \
-		.
+.PHONY: format
+format:  ## ruff auto-format
+	uv run ruff format .
 
-.PHONY: run-local
-run-local: ## Run the Docker container build from the local Dockerfile.
-	docker run \
-		--rm \
-		$(LOCAL_IMAGE_NAME)
+.PHONY: typecheck
+typecheck:  ## mypy static type checks
+	uv run mypy src
+
+.PHONY: test
+test:  ## run the test suite
+	uv run pytest
