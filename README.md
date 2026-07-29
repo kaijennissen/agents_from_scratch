@@ -17,8 +17,8 @@ on the host is reachable at `$OLLAMA_HOST` (`http://host.docker.internal:11434`)
 ## Commands
 
 ```bash
-make lint        # ruff lint
-make format      # ruff format
-make typecheck   # mypy
-make test        # pytest
+uv run ruff check .     # lint
+uv run ruff format .    # format
+uv run mypy src         # type-check
+uv run pytest           # test
 ```
