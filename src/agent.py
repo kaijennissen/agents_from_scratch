@@ -1,11 +1,25 @@
-import re
 import itertools
-import httpx
+import re
 import subprocess
+from typing import TypedDict, cast
 
-OLLAMA_ENDPOINT="http://localhost:11434/api/chat"
-MODEL="glm-5.2:cloud"
-SYSTEM_PROMPT="""You are an autonomous coding agent. You solve the user's task by taking one action at a time: you act, observe the result, then decide the next action.
+import httpx
+
+
+class Message(TypedDict):
+    role: str
+    content: str
+
+
+class Actions(TypedDict):
+    bash: list[str]
+    message: list[str]
+    exit: list[str]
+
+
+OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
+MODEL = "glm-5.2:cloud"
+SYSTEM_PROMPT = """You are an autonomous coding agent. You solve the user's task by taking one action at a time: you act, observe the result, then decide the next action.
 Always explore your environment first. You're running on a computer and have acess to a file-system as well as a bash-shell.
 
 Every reply you send is exactly one action, written as a single <action> element containing exactly one of the three inner tags below. Output only the <action> element, with nothing before or after it.
@@ -64,74 +78,92 @@ Examples:
 """
 
 
-
-def llm_call(messages:list)->str:
-    r=httpx.post(OLLAMA_ENDPOINT,json={"model":MODEL,"stream":False, "messages":messages},timeout=120)
+def llm_call(messages: list[Message]) -> str:
+    r = httpx.post(
+        OLLAMA_ENDPOINT,
+        json={"model": MODEL, "stream": False, "messages": messages},
+        timeout=120,
+    )
     r.raise_for_status()
-    return r.json()["message"]["content"]
+    return cast(str, r.json()["message"]["content"])
 
 
-def parse_xml(tag:str, string:str)->list:
+def parse_xml(tag: str, string: str) -> list[str]:
     """All contents of <tag>...</tag>, in order of apn pearance, whitespace-stripped."""
     pattern = rf"<{re.escape(tag)}>(.*?)</{re.escape(tag)}>"
     return [m.strip() for m in re.findall(pattern, string, re.DOTALL)]
 
 
-def parse_action(text:str)->list:
+def parse_action(text: str) -> Actions:
+    actions = parse_xml(tag="action", string=text)
 
-    actions=parse_xml(tag="action",string=text)
+    bash_actions = list(
+        itertools.chain.from_iterable(
+            [parse_xml(tag="bash", string=action) for action in actions]
+        )
+    )
+    message_actions = list(
+        itertools.chain.from_iterable(
+            [parse_xml(tag="message", string=action) for action in actions]
+        )
+    )
+    exit_actions = list(
+        itertools.chain.from_iterable(
+            [parse_xml(tag="exit", string=action) for action in actions]
+        )
+    )
 
-    bash_actions=list(itertools.chain.from_iterable([parse_xml(tag="bash",string=action) for action in actions]))
-    message_actions=list(itertools.chain.from_iterable([parse_xml(tag="message",string=action) for action in actions]))
-    exit_actions=list(itertools.chain.from_iterable([parse_xml(tag="exit",string=action) for action in actions]))
+    return {"bash": bash_actions, "message": message_actions, "exit": exit_actions}
 
-    return {"bash":bash_actions,"message":message_actions,"exit":exit_actions}
 
-def main(prompt:str):
-
-    messages=[{"role":"system","content":SYSTEM_PROMPT},{"role":"user","content":prompt}]
-    stop=False
-    max_turns=5
-    turn=0
+def main(prompt: str) -> None:
+    messages: list[Message] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+    stop = False
+    max_turns = 5
+    turn = 0
 
     while not stop:
-        turn+=1
-        if turn>max_turns:
+        turn += 1
+        if turn > max_turns:
             break
         print(messages)
-        response=llm_call(messages)
+        response = llm_call(messages)
         print(response)
-        actions=parse_action(response)
+        actions = parse_action(response)
 
         print(actions)
-        exit_action=actions.get("exit",None)
+        exit_action = actions.get("exit", None)
         if exit_action:
             break
 
-        message_actions=actions.get("message",None)
+        message_actions = actions.get("message", None)
         if message_actions:
             print(message_actions)
-        
-        bash_actions=actions.get("bash",None)
+
+        bash_actions = actions.get("bash", None)
         if bash_actions:
             print(f"Bash: {bash_actions}")
-            result=subprocess.run(bash_actions[0], capture_output=True,text=True,shell=True) 
-            content=f"""
+            result = subprocess.run(
+                bash_actions[0], capture_output=True, text=True, shell=True
+            )
+            content = f"""
             Bash-Result:
             stdout: {result.stdout}
             stderr: {result.stderr}
             returncode: {result.returncode}
             """
 
-            messages.append({"role":"user","content":content}) 
+            messages.append({"role": "user", "content": content})
 
 
 if __name__ == "__main__":
-
     import argparse
-    parser=argparse.ArgumentParser("Coding agent from scratch")
-    parser.add_argument("-p","--prompt",required=True,type=str,help="the prompt")
-    args=parser.parse_args()
+
+    parser = argparse.ArgumentParser("Coding agent from scratch")
+    parser.add_argument("-p", "--prompt", required=True, type=str, help="the prompt")
+    args = parser.parse_args()
 
     main(prompt=args.prompt)
-
