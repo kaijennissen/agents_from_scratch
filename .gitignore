@@ -38,6 +38,9 @@ runs/**
 credentials.yaml
 CLAUDE.md
 
+# letta code agent state (holds API keys / refresh tokens — never commit)
+.letta/
+
 # PyCharm+all JetBrains IDEs
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, GoLand, ReSharper, Rider, MPS, WebStorm, DataGrip, and more.
 .idea/
@@ -199,8 +202,7 @@ ENV/
 env.bak/
 venv.bak/
 
-# uv
-uv.lock
+# uv: the lockfile is committed for reproducible installs, so it is NOT ignored.
 
 # Spyder project settings
 .spyderproject

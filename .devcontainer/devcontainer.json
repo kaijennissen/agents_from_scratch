@@ -1,0 +1,33 @@
+{
+  "name": "agents_from_scratch",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+
+  // Reach the Ollama server running on the host. On Docker Desktop (macOS)
+  // host.docker.internal resolves automatically and reaches host services
+  // bound to 127.0.0.1:11434; the runArg adds the same name on Linux hosts.
+  "runArgs": ["--add-host=host.docker.internal:host-gateway"],
+  "containerEnv": {
+    "OLLAMA_HOST": "http://host.docker.internal:11434"
+  },
+
+  // Build the venv (dependencies + editable project) from the committed
+  // lockfile once, after the container is created. The venv lives at
+  // /opt/venv, off the bind-mounted workspace (see .devcontainer/Dockerfile).
+  "postCreateCommand": "uv sync --frozen",
+
+  "remoteUser": "dev",
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python"
+      },
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff"
+      ]
+    }
+  }
+}
