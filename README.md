@@ -22,3 +22,25 @@ uv run ruff format .    # format
 uv run mypy src         # type-check
 uv run pytest           # test
 ```
+
+
+### Docker
+```sh
+docker build --tag agent_sandbox --file Dockerfile .
+docker run  --rm \
+    -it \
+    --read-only \
+    --tmpfs /tmp:size=64m \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 100 \
+    --memory 4g \
+    --cpus 2 \
+    --add-host=host.docker.internal:host-gateway \
+    --name agent-sandbox \
+    agent_sandbox
+
+# add later once added to Dockerfile    
+\\#--user 1000:1000 \
+#--volumne /tmp/agent-workspace:/workspace \
+```
