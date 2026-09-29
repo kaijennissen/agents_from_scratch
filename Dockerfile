@@ -23,5 +23,9 @@ RUN groupadd --gid 1000 agent && \
 ENV HOME=/tmp
 USER agent
 
+# Model-written commands start in the host-provided clone, not in the
+# read-only harness copy under /app. See README "Run the agent".
+WORKDIR /workspace
+
 CMD ["/bin/bash"]
 
