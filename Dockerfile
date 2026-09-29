@@ -13,7 +13,7 @@ RUN uv sync --locked --no-dev --no-install-project
 
 COPY src/ src/
 
-RUN uv sync --locked --no-dev --no-editable 
+RUN uv sync --locked --no-dev --no-editable
 
 # Run as an unprivileged user. Everything above stays root-owned, so the agent
 # cannot modify its own harness. The root filesystem is mounted read-only at
@@ -28,4 +28,3 @@ USER agent
 WORKDIR /workspace
 
 CMD ["/bin/bash"]
-

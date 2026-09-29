@@ -17,3 +17,23 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: uv-lock-check
+        name: uv lock --check
+        entry: uv lock --check
+        language: system
+        pass_filenames: false
+
+      - id: pyright
+        name: pyright
+        entry: uv run --locked pyright
+        language: system
+        pass_filenames: false
+        types_or: [python]

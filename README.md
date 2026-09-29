@@ -6,12 +6,7 @@ against an Ollama model server running on the host.
 
 ## Develop
 
-Open the repo in the dev container (details: [`.devcontainer/README.md`](.devcontainer/README.md)):
-
-- **VS Code**: *Reopen in Container*.
-- **Zed**: opens from the same `devcontainer.json`.
-
-The container ships Python 3.14.4 + uv; `uv sync` builds the environment. Ollama
+Development uses uv with Python 3.14.4; `uv sync` builds the environment. Ollama
 on the host is reachable at `$OLLAMA_HOST` (`http://host.docker.internal:11434`).
 
 ## Commands
@@ -19,7 +14,7 @@ on the host is reachable at `$OLLAMA_HOST` (`http://host.docker.internal:11434`)
 ```bash
 uv run ruff check .     # lint
 uv run ruff format .    # format
-uv run mypy src         # type-check
+uv run pyright          # type-check
 uv run pytest           # test
 ```
 
@@ -53,13 +48,13 @@ docker run --rm \
     --volume /tmp/agent-workspace:/workspace \
     --name agent-sandbox \
     agent_sandbox \
-    /opt/app/bin/python /app/src/agent.py --prompt "..."
+    /opt/app/bin/agents-from-scratch --prompt "..."
 
 # 4. Review the agent's changes on the host.
 git -C /tmp/agent-workspace status
 git -C /tmp/agent-workspace diff
 ```
 
-Omit the trailing `python` command to get an interactive shell in the same
+Omit the trailing command to get an interactive shell in the same
 container instead. On a Linux host the clone must be writable by UID 1000,
 the container's `agent` user.
