@@ -2,6 +2,6 @@
 
 
 def test_package_imports() -> None:
-    import your_project_name
+    import agents_from_scratch
 
-    assert your_project_name.__version__
+    assert agents_from_scratch.__version__

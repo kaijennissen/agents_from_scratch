@@ -1,3 +1,4 @@
+import argparse
 import itertools
 import re
 import subprocess
@@ -161,11 +162,13 @@ def main(prompt: str) -> None:
             messages.append({"role": "user", "content": content})
 
 
-if __name__ == "__main__":
-    import argparse
-
+def cli() -> None:
     parser = argparse.ArgumentParser("Coding agent from scratch")
     parser.add_argument("-p", "--prompt", required=True, type=str, help="the prompt")
     args = parser.parse_args()
 
     main(prompt=args.prompt)
+
+
+if __name__ == "__main__":
+    cli()

@@ -53,13 +53,13 @@ docker run --rm \
     --volume /tmp/agent-workspace:/workspace \
     --name agent-sandbox \
     agent_sandbox \
-    /opt/app/bin/python /app/src/agent.py --prompt "..."
+    /opt/app/bin/agents-from-scratch --prompt "..."
 
 # 4. Review the agent's changes on the host.
 git -C /tmp/agent-workspace status
 git -C /tmp/agent-workspace diff
 ```
 
-Omit the trailing `python` command to get an interactive shell in the same
+Omit the trailing command to get an interactive shell in the same
 container instead. On a Linux host the clone must be writable by UID 1000,
 the container's `agent` user.
