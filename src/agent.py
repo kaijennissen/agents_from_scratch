@@ -17,8 +17,9 @@ class Actions(TypedDict):
     exit: list[str]
 
 
-OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
-MODEL = "glm-5.2:cloud"
+# OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
+OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
+MODEL = "qwen3.8:27b-mlx"
 SYSTEM_PROMPT = """You are an autonomous coding agent. You solve the user's task by taking one action at a time: you act, observe the result, then decide the next action.
 Always explore your environment first. You're running on a computer and have acess to a file-system as well as a bash-shell.
 
@@ -131,6 +132,7 @@ def main(prompt: str) -> None:
             break
         print(messages)
         response = llm_call(messages)
+        messages.append({"role": "assistant", "content": response})
         print(response)
         actions = parse_action(response)
 
