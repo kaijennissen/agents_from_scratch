@@ -40,7 +40,6 @@ docker run  --rm \
     --name agent-sandbox \
     agent_sandbox
 
-# add later once added to Dockerfile    
-\\#--user 1000:1000 \
-#--volumne /tmp/agent-workspace:/workspace \
+# add later once the workspace clone exists
+#--volume /tmp/agent-workspace:/workspace \
 ```
