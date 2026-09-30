@@ -10,13 +10,20 @@ def test_parse_xml_returns_stripped_contents_in_order() -> None:
     assert parse_xml("exit", text) == []
 
 
-def test_parse_action_buckets_each_tag() -> None:
-    text = (
-        "<action><bash>ls</bash><message>thinking</message><exit>done</exit></action>"
-    )
+def test_parse_action_extracts_single_tag() -> None:
+    text = "<action>\n<bash>ls -alh src</bash>\n</action>"
 
-    assert parse_action(text) == {
-        "bash": ["ls"],
-        "message": ["thinking"],
-        "exit": ["done"],
-    }
+    assert parse_action(text) == {"bash": "ls -alh src"}
+
+
+def test_parse_action_prefers_exit_over_bash() -> None:
+    """One action per turn is the contract; exit wins if the model breaks it."""
+
+    text = "<action><bash>ls</bash><exit>done</exit></action>"
+
+    assert parse_action(text) == {"exit": "done"}
+
+
+def test_parse_action_empty_when_no_known_tag() -> None:
+    assert parse_action("<action><think>hmm</think></action>") == {}
+    assert parse_action("I would just run ls, if I could.") == {}

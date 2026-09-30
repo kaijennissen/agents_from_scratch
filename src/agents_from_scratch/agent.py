@@ -1,10 +1,22 @@
+"""A minimal coding agent: an act -> observe -> decide loop over an LLM.
+
+Each turn: ask the model for exactly one action, execute it, feed the result
+back. The loop ends when the model emits <exit> or the turn budget runs out.
+"""
+
 import argparse
-import itertools
 import re
 import subprocess
 from typing import TypedDict, cast
 
 import httpx
+
+# OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
+OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
+MODEL = "qwen3:27b"
+
+MAX_TURNS = 5  # safety net; the agent is meant to stop itself with <exit>
+MAX_OUTPUT_CHARS = 2000  # tool output is context we pay for on every later turn
 
 
 class Message(TypedDict):
@@ -12,23 +24,13 @@ class Message(TypedDict):
     content: str
 
 
-class Actions(TypedDict):
-    bash: list[str]
-    message: list[str]
-    exit: list[str]
-
-
-# OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
-OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
-MODEL = "qwen3.8:27b-mlx"
 SYSTEM_PROMPT = """You are an autonomous coding agent. You solve the user's task by taking one action at a time: you act, observe the result, then decide the next action.
-Always explore your environment first. You're running on a computer and have acess to a file-system as well as a bash-shell.
+Always explore your environment first. You're running on a computer and have access to a file-system as well as a bash-shell.
 
-Every reply you send is exactly one action, written as a single <action> element containing exactly one of the three inner tags below. Output only the <action> element, with nothing before or after it.
+Every reply you send is exactly one action, written as a single <action> element containing exactly one of the two inner tags below. Output only the <action> element, with nothing before or after it.
 
-The three actions:
+The two actions:
 - <bash>: run a shell command. Put the command inside the tag. The command's output is sent back to you as the next message, then you continue.
-- <message>: send a plain message to the user without running anything (for example to state your plan or ask a question). You then continue.
 - <exit>: the task is done. This ends the loop. Put your final answer to the user inside the tag.
 
 Examples:
@@ -46,21 +48,6 @@ Examples:
 # Run a command with a pipe
 <action>
 <bash>grep -rn "ValueError" src | head -n 20</bash>
-</action>
-
-# Message the user: state your plan
-<action>
-<message>I'll first inspect the project layout, then find the failing test.</message>
-</action>
-
-# Message the user: report progress
-<action>
-<message>Found the bug in main.py line 42; I'll patch the loop next.</message>
-</action>
-
-# Message the user: ask a question
-<action>
-<message>There are two config files. Should I edit config.toml or config.dev.toml?</message>
 </action>
 
 # Finish: report a fix
@@ -91,75 +78,51 @@ def llm_call(messages: list[Message]) -> str:
 
 
 def parse_xml(tag: str, string: str) -> list[str]:
-    """All contents of <tag>...</tag>, in order of apn pearance, whitespace-stripped."""
+    """All contents of <tag>...</tag>, in order of appearance, whitespace-stripped."""
     pattern = rf"<{re.escape(tag)}>(.*?)</{re.escape(tag)}>"
     return [m.strip() for m in re.findall(pattern, string, re.DOTALL)]
 
 
-def parse_action(text: str) -> Actions:
-    actions = parse_xml(tag="action", string=text)
+def parse_action(text: str) -> dict[str, str]:
+    """Read the model's reply and return the single action it asked for.
 
-    bash_actions = list(
-        itertools.chain.from_iterable(
-            [parse_xml(tag="bash", string=action) for action in actions]
-        )
-    )
-    message_actions = list(
-        itertools.chain.from_iterable(
-            [parse_xml(tag="message", string=action) for action in actions]
-        )
-    )
-    exit_actions = list(
-        itertools.chain.from_iterable(
-            [parse_xml(tag="exit", string=action) for action in actions]
-        )
-    )
-
-    return {"bash": bash_actions, "message": message_actions, "exit": exit_actions}
+    The tags are tried in order, so <exit> wins if the reply somehow contains both.
+    Returns an empty dict if there is no action tag at all.
+    """
+    for tag in ("exit", "bash"):
+        if bodies := parse_xml(tag, text):
+            return {tag: bodies[0]}
+    return {}
 
 
-def main(prompt: str) -> None:
+def main(prompt: str) -> str:
     messages: list[Message] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt},
     ]
-    stop = False
-    max_turns = 5
-    turn = 0
 
-    while not stop:
-        turn += 1
-        if turn > max_turns:
-            break
-        print(messages)
+    for _ in range(MAX_TURNS):
         response = llm_call(messages)
+        print(response)  # the model speaking: the one moment worth watching
         messages.append({"role": "assistant", "content": response})
-        print(response)
-        actions = parse_action(response)
 
-        print(actions)
-        exit_action = actions.get("exit", None)
-        if exit_action:
-            break
-
-        message_actions = actions.get("message", None)
-        if message_actions:
-            print(message_actions)
-
-        bash_actions = actions.get("bash", None)
-        if bash_actions:
-            print(f"Bash: {bash_actions}")
+        action = parse_action(response)
+        if "exit" in action:
+            return action["exit"]
+        if "bash" in action:
+            command = action["bash"]
             result = subprocess.run(
-                bash_actions[0], capture_output=True, text=True, shell=True
+                command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=120,
             )
-            content = f"""
-            Bash-Result:
-            stdout: {result.stdout}
-            stderr: {result.stderr}
-            returncode: {result.returncode}
-            """
+            observation = f"Output of `$ {command}`:\n{result.stdout[:MAX_OUTPUT_CHARS]}\n(exit code {result.returncode})"
+            messages.append({"role": "user", "content": observation})
 
-            messages.append({"role": "user", "content": content})
+    return f"Ran out of turns ({MAX_TURNS}) without an <exit> action."
 
 
 def cli() -> None:
@@ -167,7 +130,7 @@ def cli() -> None:
     parser.add_argument("-p", "--prompt", required=True, type=str, help="the prompt")
     args = parser.parse_args()
 
-    main(prompt=args.prompt)
+    print(main(prompt=args.prompt))
 
 
 if __name__ == "__main__":
