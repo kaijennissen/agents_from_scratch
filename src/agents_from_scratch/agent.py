@@ -13,7 +13,7 @@ import httpx
 
 # OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
 OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
-MODEL = "qwen3:27b"
+MODEL = "qwen3.8:27b-mlx"
 
 MAX_TURNS = 5  # safety net; the agent is meant to stop itself with <exit>
 MAX_OUTPUT_CHARS = 2000  # tool output is context we pay for on every later turn
