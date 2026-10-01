@@ -9,7 +9,7 @@ import re
 import subprocess
 from typing import TypedDict, cast
 
-import httpx
+import httpx2
 
 # OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
 OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
@@ -68,7 +68,7 @@ Examples:
 
 
 def llm_call(messages: list[Message]) -> str:
-    r = httpx.post(
+    r = httpx2.post(
         OLLAMA_ENDPOINT,
         json={"model": MODEL, "stream": False, "messages": messages},
         timeout=120,
