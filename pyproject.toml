@@ -12,7 +12,7 @@ description = "A coding agent built from scratch with an XML action loop calling
 requires-python = ">=3.14.4"
 dependencies = [
     "structlog",
-    "httpx",
+    "httpx2",
 ]
 
 [project.scripts]
