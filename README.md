@@ -9,6 +9,42 @@ against an Ollama model server running on the host.
 Development uses uv with Python 3.14.4; `uv sync` builds the environment. Ollama
 on the host is reachable at `$OLLAMA_HOST` (`http://host.docker.internal:11434`).
 
+## Run
+
+```bash
+uv run agents-from-scratch -p "what does parse_action do?"
+```
+
+Every step of the loop is announced on an event stream — one line per event,
+payload indented underneath:
+
+```
+        👤 you    what is in src/?
+turn  1 🧠 llm    bash · ls -alh src
+turn  1 ⚙️ tool   $ ls -alh src
+turn  1 📄 tool   ✓ · rc=0 · ms=6
+                  total 8
+                  drwxr-xr-x  5 kai  staff  160 .
+                  -rw-r--r--  1 kai  staff  216 agent.py
+turn  2 🧠 llm    exit · src/ has one module, agent.py, which loops over actions.
+turn  2 🎯 done   src/ has one module, agent.py, which loops over actions.
+turn  2 ⚡ run    2 turns · 2874 tok · 4.1s
+```
+
+| | event | |
+|---|---|---|
+| 👤 | `user.prompt` | the prompt |
+| 🧠 | `llm.call` | what the model returned, action wrapper stripped |
+| ⚙️ | `tool.call` | the command handed to the shell, as `$ …` |
+| 📄 | `tool.result` | return code, duration, output (truncated) |
+| 🎯 | `agent.final` | the answer, ending the loop |
+| 🧩 | `agent.parse_error` | a reply that contained no action |
+| ⚡ | `run.summary` | turns, tokens, wall time |
+
+`-v quiet` prints just the answer, `-v verbose` adds per-call usage and
+untruncated output, `-v debug` adds the context size. `--no-color` (or
+`NO_COLOR`) for logs.
+
 ## Commands
 
 ```bash
