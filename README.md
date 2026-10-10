@@ -1,4 +1,4 @@
-# agents_from_scratch
+# agents from scratch
 
 Building a coding agent from scratch. Development happens **inside a container** —
 the container is the isolation boundary for the arbitrary code the agent runs —
