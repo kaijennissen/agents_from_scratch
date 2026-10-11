@@ -77,10 +77,10 @@ def llm_call(messages: list[Message]) -> str:
     return cast(str, r.json()["message"]["content"])
 
 
-def parse_xml(tag: str, string: str) -> list[str]:
+def parse_xml(tag: str, string: str) -> str:
     """All contents of <tag>...</tag>, in order of appearance, whitespace-stripped."""
     pattern = rf"<{re.escape(tag)}>(.*?)</{re.escape(tag)}>"
-    return [m.strip() for m in re.findall(pattern, string, re.DOTALL)]
+    return [m.strip() for m in re.findall(pattern, string, re.DOTALL)][0]
 
 
 def parse_action(text: str) -> dict[str, str]:
@@ -92,10 +92,10 @@ def parse_action(text: str) -> dict[str, str]:
     for tag in ("exit", "bash"):
         if bodies := parse_xml(tag, text):
             return {tag: bodies[0]}
-    return {}
+    return {"exit": "No action"}
 
 
-def run_agent(messages: list[Message]) -> tuple(str, list[Message]):
+def run_agent(messages: list[Message]) -> tuple[str, list[Message]]:
     for _ in range(MAX_TURNS):
         response = llm_call(messages)
         # print(response)  # the model speaking: the one moment worth watching
