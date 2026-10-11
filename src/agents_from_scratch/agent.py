@@ -15,7 +15,7 @@ import httpx2
 OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
 MODEL = "qwen3.8:27b-mlx"
 
-MAX_TURNS = 5  # safety net; the agent is meant to stop itself with <exit>
+MAX_TURNS = 15  # safety net; the agent is meant to stop itself with <exit>
 MAX_OUTPUT_CHARS = 2000  # tool output is context we pay for on every later turn
 
 
@@ -92,23 +92,18 @@ def parse_action(text: str) -> dict[str, str]:
     for tag in ("exit", "bash"):
         if bodies := parse_xml(tag, text):
             return {tag: bodies[0]}
-    return {}
+    return {"exit": "No action"}
 
 
-def main(prompt: str) -> str:
-    messages: list[Message] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": prompt},
-    ]
-
+def run_agent(messages: list[Message]) -> tuple[str, list[Message]]:
     for _ in range(MAX_TURNS):
         response = llm_call(messages)
-        print(response)  # the model speaking: the one moment worth watching
+        # print(response)  # the model speaking: the one moment worth watching
         messages.append({"role": "assistant", "content": response})
 
         action = parse_action(response)
         if "exit" in action:
-            return action["exit"]
+            return action["exit"], messages
         if "bash" in action:
             command = action["bash"]
             result = subprocess.run(
@@ -122,15 +117,36 @@ def main(prompt: str) -> str:
             observation = f"Output of `$ {command}`:\n{result.stdout[:MAX_OUTPUT_CHARS]}\n(exit code {result.returncode})"
             messages.append({"role": "user", "content": observation})
 
-    return f"Ran out of turns ({MAX_TURNS}) without an <exit> action."
+    return f"Ran out of turns ({MAX_TURNS}) without an <exit> action.", messages
+
+
+def main(prompt: str | None) -> None:
+    stop: bool = False
+    messages: list[Message] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+    ]
+
+    if prompt:
+        messages.append({"role": "user", "content": prompt})
+        answer, _ = run_agent(messages)
+        print(answer)
+    else:
+        while not stop:
+            prompt = input(">")
+            if prompt == "exit":
+                stop = True
+            else:
+                messages.append({"role": "user", "content": prompt})
+                answer, messages = run_agent(messages)
+                print(answer)
 
 
 def cli() -> None:
     parser = argparse.ArgumentParser("Coding agent from scratch")
-    parser.add_argument("-p", "--prompt", required=True, type=str, help="the prompt")
+    parser.add_argument("-p", "--prompt", required=False, type=str, help="the prompt")
     args = parser.parse_args()
 
-    print(main(prompt=args.prompt))
+    main(prompt=args.prompt)
 
 
 if __name__ == "__main__":
