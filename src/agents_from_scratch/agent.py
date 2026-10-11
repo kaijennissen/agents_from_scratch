@@ -100,7 +100,7 @@ def run_agent(messages: list[Message]) -> tuple(str, list[Message]):
 
     for _ in range(MAX_TURNS):
         response = llm_call(messages)
-        #print(response)  # the model speaking: the one moment worth watching
+        # print(response)  # the model speaking: the one moment worth watching
         messages.append({"role": "assistant", "content": response})
 
         action = parse_action(response)
@@ -122,22 +122,22 @@ def run_agent(messages: list[Message]) -> tuple(str, list[Message]):
     return f"Ran out of turns ({MAX_TURNS}) without an <exit> action.", messages
 
 def main(prompt: str | None) -> None:
-    stop:bool=False
+    stop: bool = False
     messages: list[Message] = [
         {"role": "system", "content": SYSTEM_PROMPT},
     ]
 
     if prompt:
-        messages.append({"role": "user","content":prompt})
+        messages.append({"role": "user", "content": prompt})
         answer, _ = run_agent(messages)
         print(answer)
     else:
         while not stop:
-            prompt=input(">")
+            prompt = input(">")
             if prompt == "exit":
                 stop = True
             else:
-                messages.append({"role": "user","content":prompt})
+                messages.append({"role": "user","content": prompt})
                 answer, messages = run_agent(messages)
                 print(answer)
 
