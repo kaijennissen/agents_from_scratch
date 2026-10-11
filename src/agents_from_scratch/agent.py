@@ -77,10 +77,10 @@ def llm_call(messages: list[Message]) -> str:
     return cast(str, r.json()["message"]["content"])
 
 
-def parse_xml(tag: str, string: str) -> str:
+def parse_xml(tag: str, string: str) -> list[str]:
     """All contents of <tag>...</tag>, in order of appearance, whitespace-stripped."""
     pattern = rf"<{re.escape(tag)}>(.*?)</{re.escape(tag)}>"
-    return [m.strip() for m in re.findall(pattern, string, re.DOTALL)][0]
+    return [m.strip() for m in re.findall(pattern, string, re.DOTALL)]
 
 
 def parse_action(text: str) -> dict[str, str]:

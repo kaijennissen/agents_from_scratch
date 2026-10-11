@@ -25,5 +25,5 @@ def test_parse_action_prefers_exit_over_bash() -> None:
 
 
 def test_parse_action_empty_when_no_known_tag() -> None:
-    assert parse_action("<action><think>hmm</think></action>") == {}
-    assert parse_action("I would just run ls, if I could.") == {}
+    assert parse_action("<action><think>hmm</think></action>") == {"exit": "No action"}
+    assert parse_action("I would just run ls, if I could.") == {"exit": "No action"}
