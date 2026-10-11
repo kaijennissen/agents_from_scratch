@@ -96,7 +96,7 @@ def parse_action(text: str) -> dict[str, str]:
 
 
 
-def run_agent(messages:list[Message]) -> tuple(str, list[Message]):
+def run_agent(messages: list[Message]) -> tuple(str, list[Message]):
 
     for _ in range(MAX_TURNS):
         response = llm_call(messages)
@@ -134,11 +134,11 @@ def main(prompt: str | None) -> None:
     else:
         while not stop:
             prompt=input(">")
-            if prompt=="exit":
-                stop=True
+            if prompt == "exit":
+                stop = True
             else:
                 messages.append({"role": "user","content":prompt})
-                answer, messages=run_agent(messages)
+                answer, messages = run_agent(messages)
                 print(answer)
 
 def cli() -> None:
