@@ -132,7 +132,7 @@ def main(prompt: str | None) -> None:
         print(answer)
     else:
         while not stop:
-            prompt = input(">")
+            prompt = input("> ")
             if prompt == "exit":
                 stop = True
             else:
