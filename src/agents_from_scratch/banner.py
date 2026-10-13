@@ -60,19 +60,19 @@ def print_banner(model: str) -> None:
 
 
 def render_prompt(color: bool, readline_active: bool) -> str:
-    """Input prompt: three arrows in the k/a/i brand colours.
+    """Input prompt: three chevrons in the k/a/i brand colours.
 
     When readline drives input() it counts escape codes as visible text and
     misplaces the cursor while editing; wrapping each code in \\001...\\002
     marks it as zero-width.
     """
     if not color:
-        return ">>> "
+        return "❯❯❯ "
 
     def code(seq: str) -> str:
         return f"\001{seq}\002" if readline_active else seq
 
-    return f"{code(MAGENTA)}>{code(BLUE)}>{code(LIME)}>{code(RESET)} "
+    return f"{code(MAGENTA)}❯{code(BLUE)}❯{code(LIME)}❯{code(RESET)} "
 
 
 def prompt_text() -> str:
