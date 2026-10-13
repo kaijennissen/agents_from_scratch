@@ -15,7 +15,7 @@ import httpx2
 OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
 MODEL = "qwen3.8:27b-mlx"
 
-MAX_TURNS = 15  # safety net; the agent is meant to stop itself with <exit>
+DEFAULT_MAX_TURNS = 25  # safety net; the agent is meant to stop itself with <exit>
 MAX_OUTPUT_CHARS = 2000  # tool output is context we pay for on every later turn
 
 
@@ -120,7 +120,7 @@ def run_agent(messages: list[Message]) -> tuple[str, list[Message]]:
     return f"Ran out of turns ({MAX_TURNS}) without an <exit> action.", messages
 
 
-def main(prompt: str | None) -> None:
+def main(prompt: str | None, max_turns:int) -> None:
     stop: bool = False
     messages: list[Message] = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -144,9 +144,10 @@ def main(prompt: str | None) -> None:
 def cli() -> None:
     parser = argparse.ArgumentParser("Coding agent from scratch")
     parser.add_argument("-p", "--prompt", required=False, type=str, help="the prompt")
+    parser.add_argument("-t", "--max-turns", required=True, default=DEFAULT_MAX_TURNS, type=int, help="max turns")
     args = parser.parse_args()
 
-    main(prompt=args.prompt)
+    main(prompt=args.prompt, max_turns=args.max_turns)
 
 
 if __name__ == "__main__":
