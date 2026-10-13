@@ -131,7 +131,7 @@ def main(prompt: str | None) -> None:
     if prompt:
         messages.append({"role": "user", "content": prompt})
         answer, _ = run_agent(messages)
-        print(answer)
+        print("\n" + answer + "\n")
     else:
         print_banner(MODEL)  # interactive only; keeps -p output pipe-clean
         while not stop:
@@ -141,7 +141,7 @@ def main(prompt: str | None) -> None:
             else:
                 messages.append({"role": "user", "content": prompt})
                 answer, messages = run_agent(messages)
-                print(answer)
+                print("\n" + answer + "\n")
 
 
 def cli() -> None:
