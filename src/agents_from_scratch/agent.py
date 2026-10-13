@@ -129,16 +129,16 @@ def main(prompt: str | None) -> None:
     if prompt:
         messages.append({"role": "user", "content": prompt})
         answer, _ = run_agent(messages)
-        print(answer)
+        print("\n" + answer + "\n")
     else:
         while not stop:
-            prompt = input(">")
+            prompt = input("> ")
             if prompt == "exit":
                 stop = True
             else:
                 messages.append({"role": "user", "content": prompt})
                 answer, messages = run_agent(messages)
-                print(answer)
+                print("\n" + answer + "\n")
 
 
 def cli() -> None:
