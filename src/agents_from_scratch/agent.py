@@ -11,6 +11,8 @@ from typing import TypedDict, cast
 
 import httpx2
 
+from agents_from_scratch.banner import print_banner, prompt_text
+
 # OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
 OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
 MODEL = "qwen3.8:27b-mlx"
@@ -129,16 +131,17 @@ def main(prompt: str | None, max_turns:int) -> None:
     if prompt:
         messages.append({"role": "user", "content": prompt})
         answer, _ = run_agent(messages, max_turns=max_turns)
-        print(answer)
+        print("\n" + answer + "\n")
     else:
+        print_banner(MODEL)  # interactive only; keeps -p output pipe-clean
         while not stop:
-            prompt = input(">")
+            prompt = input(prompt_text())
             if prompt == "exit":
                 stop = True
             else:
                 messages.append({"role": "user", "content": prompt})
                 answer, messages = run_agent(messages, max_turns=max_turns)
-                print(answer)
+                print("\n" + answer + "\n")
 
 
 def cli() -> None:

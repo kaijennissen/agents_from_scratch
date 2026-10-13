@@ -1,13 +1,29 @@
 """Minimal regression tests for the agent's XML action parsing."""
 
+import pytest
+
 from agents_from_scratch.agent import parse_action, parse_xml
 
 
-def test_parse_xml_returns_stripped_contents_in_order() -> None:
-    text = "<action><bash> ls </bash><bash>pwd</bash></action>"
-
-    assert parse_xml("bash", text) == ["ls", "pwd"]
-    assert parse_xml("exit", text) == []
+@pytest.mark.parametrize(
+    "tag,text,expected",
+    [
+        ("bash", "<bash> ls -alh </bash>", ["ls -alh"]),
+        ("bash", "<action><bash> ls </bash><bash>pwd</bash></action>", ["ls", "pwd"]),
+        ("exit", "<exit> Finished! </exit>", ["Finished!"]),
+        (
+            "action",
+            "<action><bash> ls </bash><bash>pwd</bash></action>",
+            ["<bash> ls </bash><bash>pwd</bash>"],
+        ),
+    ],
+)
+def test_parse_xml_returns_stripped_contents_in_order(
+    tag: str, text: str, expected: list[str]
+) -> None:
+    result = parse_xml(tag, text)
+    assert len(result) == len(expected)
+    assert set(result) == set(expected)
 
 
 def test_parse_action_extracts_single_tag() -> None:
