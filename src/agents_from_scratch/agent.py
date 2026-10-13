@@ -95,8 +95,8 @@ def parse_action(text: str) -> dict[str, str]:
     return {"exit": "No action"}
 
 
-def run_agent(messages: list[Message]) -> tuple[str, list[Message]]:
-    for _ in range(MAX_TURNS):
+def run_agent(messages: list[Message], max_turns:int) -> tuple[str, list[Message]]:
+    for _ in range(max_turns):
         response = llm_call(messages)
         # print(response)  # the model speaking: the one moment worth watching
         messages.append({"role": "assistant", "content": response})
@@ -117,7 +117,7 @@ def run_agent(messages: list[Message]) -> tuple[str, list[Message]]:
             observation = f"Output of `$ {command}`:\n{result.stdout[:MAX_OUTPUT_CHARS]}\n(exit code {result.returncode})"
             messages.append({"role": "user", "content": observation})
 
-    return f"Ran out of turns ({MAX_TURNS}) without an <exit> action.", messages
+    return f"Ran out of turns ({max_turns}) without an <exit> action.", messages
 
 
 def main(prompt: str | None, max_turns:int) -> None:
@@ -128,7 +128,7 @@ def main(prompt: str | None, max_turns:int) -> None:
 
     if prompt:
         messages.append({"role": "user", "content": prompt})
-        answer, _ = run_agent(messages)
+        answer, _ = run_agent(messages, max_turns=max_turns)
         print(answer)
     else:
         while not stop:
@@ -137,7 +137,7 @@ def main(prompt: str | None, max_turns:int) -> None:
                 stop = True
             else:
                 messages.append({"role": "user", "content": prompt})
-                answer, messages = run_agent(messages)
+                answer, messages = run_agent(messages, max_turns=max_turns)
                 print(answer)
 
 
