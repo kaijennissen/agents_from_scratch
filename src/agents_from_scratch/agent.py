@@ -121,7 +121,7 @@ def parse_action(text: str) -> dict[str, list[str]]:
     return {"exit": ["No action"]}
 
 
-def run_agent(messages: list[Message], max_turns:int) -> tuple[str, list[Message]]:
+def run_agent(messages: list[Message], max_turns: int) -> tuple[str, list[Message]]:
     for _ in range(max_turns):
         response = llm_call(messages)
         # print(response)  # the model speaking: the one moment worth watching
@@ -155,7 +155,7 @@ def run_agent(messages: list[Message], max_turns:int) -> tuple[str, list[Message
     return f"Ran out of turns ({max_turns}) without an <exit> action.", messages
 
 
-def main(prompt: str | None, max_turns:int) -> None:
+def main(prompt: str | None, max_turns: int) -> None:
     stop: bool = False
     messages: list[Message] = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -180,7 +180,14 @@ def main(prompt: str | None, max_turns:int) -> None:
 def cli() -> None:
     parser = argparse.ArgumentParser("Coding agent from scratch")
     parser.add_argument("-p", "--prompt", required=False, type=str, help="the prompt")
-    parser.add_argument("-t", "--max-turns", required=True, default=DEFAULT_MAX_TURNS, type=int, help="max turns")
+    parser.add_argument(
+        "-t",
+        "--max-turns",
+        required=True,
+        default=DEFAULT_MAX_TURNS,
+        type=int,
+        help="max turns",
+    )
     args = parser.parse_args()
 
     main(prompt=args.prompt, max_turns=args.max_turns)
