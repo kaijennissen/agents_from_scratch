@@ -4,6 +4,8 @@ Building a coding agent from scratch. Development happens **inside a container**
 the container is the isolation boundary for the arbitrary code the agent runs —
 against an Ollama model server running on the host.
 
+![koding aigent start-up banner](docs/images/startup-banner.png)
+
 ## Develop
 
 Development uses uv with Python 3.14.4; `uv sync` builds the environment. Ollama
