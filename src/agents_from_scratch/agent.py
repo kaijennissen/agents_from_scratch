@@ -17,7 +17,7 @@ from agents_from_scratch.banner import print_banner, prompt_text
 OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
 MODEL = "qwen3.8:27b-mlx"
 
-MAX_TURNS = 15  # safety net; the agent is meant to stop itself with <exit>
+DEFAULT_MAX_TURNS = 25  # safety net; the agent is meant to stop itself with <exit>
 MAX_OUTPUT_CHARS = 2000  # tool output is context we pay for on every later turn
 
 
@@ -97,8 +97,8 @@ def parse_action(text: str) -> dict[str, str]:
     return {"exit": "No action"}
 
 
-def run_agent(messages: list[Message]) -> tuple[str, list[Message]]:
-    for _ in range(MAX_TURNS):
+def run_agent(messages: list[Message], max_turns:int) -> tuple[str, list[Message]]:
+    for _ in range(max_turns):
         response = llm_call(messages)
         # print(response)  # the model speaking: the one moment worth watching
         messages.append({"role": "assistant", "content": response})
@@ -119,10 +119,10 @@ def run_agent(messages: list[Message]) -> tuple[str, list[Message]]:
             observation = f"Output of `$ {command}`:\n{result.stdout[:MAX_OUTPUT_CHARS]}\n(exit code {result.returncode})"
             messages.append({"role": "user", "content": observation})
 
-    return f"Ran out of turns ({MAX_TURNS}) without an <exit> action.", messages
+    return f"Ran out of turns ({max_turns}) without an <exit> action.", messages
 
 
-def main(prompt: str | None) -> None:
+def main(prompt: str | None, max_turns:int) -> None:
     stop: bool = False
     messages: list[Message] = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -130,7 +130,7 @@ def main(prompt: str | None) -> None:
 
     if prompt:
         messages.append({"role": "user", "content": prompt})
-        answer, _ = run_agent(messages)
+        answer, _ = run_agent(messages, max_turns=max_turns)
         print("\n" + answer + "\n")
     else:
         print_banner(MODEL)  # interactive only; keeps -p output pipe-clean
@@ -140,16 +140,17 @@ def main(prompt: str | None) -> None:
                 stop = True
             else:
                 messages.append({"role": "user", "content": prompt})
-                answer, messages = run_agent(messages)
+                answer, messages = run_agent(messages, max_turns=max_turns)
                 print("\n" + answer + "\n")
 
 
 def cli() -> None:
     parser = argparse.ArgumentParser("Coding agent from scratch")
     parser.add_argument("-p", "--prompt", required=False, type=str, help="the prompt")
+    parser.add_argument("-t", "--max-turns", required=True, default=DEFAULT_MAX_TURNS, type=int, help="max turns")
     args = parser.parse_args()
 
-    main(prompt=args.prompt)
+    main(prompt=args.prompt, max_turns=args.max_turns)
 
 
 if __name__ == "__main__":
