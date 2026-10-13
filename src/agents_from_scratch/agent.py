@@ -11,7 +11,7 @@ from typing import TypedDict, cast
 
 import httpx2
 
-from agents_from_scratch.banner import print_banner
+from agents_from_scratch.banner import print_banner, prompt_text
 
 # OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
 OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
@@ -135,7 +135,7 @@ def main(prompt: str | None) -> None:
     else:
         print_banner(MODEL)  # interactive only; keeps -p output pipe-clean
         while not stop:
-            prompt = input(">")
+            prompt = input(prompt_text())
             if prompt == "exit":
                 stop = True
             else:

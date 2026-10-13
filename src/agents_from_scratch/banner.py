@@ -1,4 +1,4 @@
-"""Start-up banner for koding aigent.
+"""Start-up banner and input prompt for koding aigent.
 
 The "kai" wordmark is the logo, one brand colour per letter; the name
 repeats them on the "k" of koding and the "ai" of aigent. Colour is
@@ -57,3 +57,23 @@ def render_banner(model: str, color: bool) -> str:
 
 def print_banner(model: str) -> None:
     print(render_banner(model, color=use_color()))
+
+
+def render_prompt(color: bool, readline_active: bool) -> str:
+    """Input prompt: three arrows in the k/a/i brand colours.
+
+    When readline drives input() it counts escape codes as visible text and
+    misplaces the cursor while editing; wrapping each code in \\001...\\002
+    marks it as zero-width.
+    """
+    if not color:
+        return ">>> "
+
+    def code(seq: str) -> str:
+        return f"\001{seq}\002" if readline_active else seq
+
+    return f"{code(MAGENTA)}>{code(BLUE)}>{code(LIME)}>{code(RESET)} "
+
+
+def prompt_text() -> str:
+    return render_prompt(color=use_color(), readline_active="readline" in sys.modules)
