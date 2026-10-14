@@ -43,9 +43,19 @@ What it does today:
 - **Quality gates** – ruff, pyright (strict), pytest, pre-commit, and CI.
 
 Known limits: one model backend (Ollama), no file-edit tool beyond what bash
-offers, no persistence between sessions, and the container still has network
-access to reach Ollama. Docker narrows the blast radius; it is not a perfect
-sandbox. Review the agent's diff before you commit or publish anything.
+offers (arguably not a limit, see below), no persistence between sessions, and
+the container still has network access to reach Ollama. Docker narrows the
+blast radius; it is not a perfect sandbox. Review the agent's diff before you
+commit or publish anything.
+
+> **Is bash-only really a limitation?** Maybe not. In
+> [*An Empirical Study of Harness Design for Coding Agents*](https://arxiv.org/abs/2609.20804)
+> (Fan et al., 2026), models with good shell proficiency did as well or better with
+> a bash-only action space than with predefined file/search/edit tools, at
+> substantially lower cost, especially on command-line-centric tasks. Weaker models
+> did worse without the structured tools, and results were mixed for some models
+> (one dropped sharply on SWE-Bench but gained on Terminal-Bench), so the benefit
+> depends on the model. The study did not evaluate the model used here.
 
 The [`diary.md`](diary.md) logs pitfalls and design decisions made along the way.
 
