@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="64" viewBox="0 0 400 64" role="img" aria-label="koding aigent">
+  <title>koding aigent</title>
+  <style>
+    text { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; font-size: 48px; font-weight: 700; fill: #f0f6fc; }
+    .k { fill: #FF00D4; }
+    .a { fill: #006FFF; }
+    .i { fill: #A9FF17; }
+  </style>
+  <text x="0" y="48" xml:space="preserve"><tspan class="k">k</tspan>oding <tspan class="a">a</tspan><tspan class="i">i</tspan>gent</text>
+</svg>
