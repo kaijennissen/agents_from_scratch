@@ -150,7 +150,6 @@ def cli() -> None:
     parser.add_argument(
         "-t",
         "--max-turns",
-        required=True,
         default=DEFAULT_MAX_TURNS,
         type=int,
         help="max turns",
