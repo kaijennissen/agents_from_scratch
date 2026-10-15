@@ -13,7 +13,7 @@ from typing import TypedDict, cast
 
 import httpx2
 
-from agents_from_scratch.banner import print_banner, prompt_text
+from agents_from_scratch.banner import GREY, print_banner, prompt_text, RESET, use_color
 
 # OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
 OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
@@ -139,6 +139,11 @@ def run_agent(messages: list[Message], max_turns: int) -> tuple[str, list[Messag
             # back together in a single observation message.
             observations: list[str] = []
             for command in action["bash"]:
+                # Show the user which tool is being invoked, in dim grey.
+                if use_color():
+                    print(f"{GREY}$ {command}{RESET}")
+                else:
+                    print(f"$ {command}")
                 result = subprocess.run(
                     command,
                     shell=True,
