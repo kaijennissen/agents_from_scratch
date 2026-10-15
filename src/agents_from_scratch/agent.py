@@ -13,7 +13,7 @@ from typing import TypedDict, cast
 
 import httpx2
 
-from agents_from_scratch.banner import GREY, print_banner, prompt_text, RESET, use_color
+from agents_from_scratch.banner import GREY, RESET, print_banner, prompt_text, use_color
 
 # OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
 OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
@@ -122,7 +122,11 @@ def parse_action(text: str) -> dict[str, list[str]]:
 
 
 def run_agent(messages: list[Message], max_turns: int) -> tuple[str, list[Message]]:
-    for _ in range(max_turns):
+    for turn in range(max_turns):
+        if use_color():
+            print(f"{GREY}Turn: {turn}/{max_turns}{RESET}")
+        else:
+            print(f"Turn: {turn}/{max_turns}")
         response = llm_call(messages)
         # print(response)  # the model speaking: the one moment worth watching
         messages.append({"role": "assistant", "content": response})
