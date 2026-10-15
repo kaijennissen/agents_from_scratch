@@ -1,7 +1,9 @@
 """A minimal coding agent: an act -> observe -> decide loop over an LLM.
 
-Each turn: ask the model for exactly one action, execute it, feed the result
-back. The loop ends when the model emits <exit> or the turn budget runs out.
+Each turn: ask the model for one or more actions, execute them (sequentially),
+feed the results back. A turn is either one <exit> or one-or-more <bash>
+actions; mixing the two is not allowed. The loop ends when the model
+emits <exit> or the turn budget runs out.
 """
 
 import argparse
@@ -11,7 +13,7 @@ from typing import TypedDict, cast
 
 import httpx2
 
-from agents_from_scratch.banner import print_banner, prompt_text
+from agents_from_scratch.banner import GREY, RESET, print_banner, prompt_text, use_color
 
 # OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
 OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
@@ -29,11 +31,11 @@ class Message(TypedDict):
 SYSTEM_PROMPT = """You are an autonomous coding agent. You solve the user's task by taking one action at a time: you act, observe the result, then decide the next action.
 Always explore your environment first. You're running on a computer and have access to a file-system as well as a bash-shell.
 
-Every reply you send is exactly one action, written as a single <action> element containing exactly one of the two inner tags below. Output only the <action> element, with nothing before or after it.
+Every reply you send is a single <action> element. It contains either exactly one <exit> tag, or one or more <bash> tags. Do not mix <exit> with <bash> in the same action. Output only the <action> element, with nothing before or after it.
 
 The two actions:
-- <bash>: run a shell command. Put the command inside the tag. The command's output is sent back to you as the next message, then you continue.
-- <exit>: the task is done. This ends the loop. Put your final answer to the user inside the tag.
+- <bash>: run a shell command. Put the command inside the tag. You may issue several <bash> tags in one action; each is executed in turn and every result is sent back to you as the next message, then you continue.
+- <exit>: the task is done. This ends the loop. Put your final answer to the user inside the tag. An <exit> action contains no <bash> tags.
 
 Examples:
 
@@ -45,6 +47,12 @@ Examples:
 # Run another command
 <action>
 <bash>wc -l path/to/file.py</bash>
+</action>
+
+# Run several independent commands at once (each result comes back together)
+<action>
+<bash>ls -alh src</bash>
+<bash>wc -l src/*.py</bash>
 </action>
 
 # Run a command with a pipe
@@ -85,39 +93,73 @@ def parse_xml(tag: str, string: str) -> list[str]:
     return [m.strip() for m in re.findall(pattern, string, re.DOTALL)]
 
 
-def parse_action(text: str) -> dict[str, str]:
-    """Read the model's reply and return the single action it asked for.
+def parse_action(text: str) -> dict[str, list[str]]:
+    """Read the model's reply and return the action(s) it asked for.
 
-    The tags are tried in order, so <exit> wins if the reply somehow contains both.
-    Returns an empty dict if there is no action tag at all.
+    A turn is either a single <exit> or one-or-more <bash> actions. Every
+    action in the reply must be of the same type; a reply that mixes <exit>
+    with <bash> is invalid and is reported as an error. Returns
+    {"exit": ["No action"]} when there is no recognised tag at all, so the
+    loop always terminates cleanly.
     """
-    for tag in ("exit", "bash"):
-        if bodies := parse_xml(tag, text):
-            return {tag: bodies[0]}
-    return {"exit": "No action"}
+    exit_bodies = parse_xml("exit", text)
+    bash_bodies = parse_xml("bash", text)
+    if exit_bodies and bash_bodies:
+        # Mixing the two action types is not allowed. Signal the mistake as
+        # an error so the loop can feed it back and the model can retry,
+        # rather than silently terminating.
+        error = (
+            "Invalid action: a turn may contain either a single <exit> tag "
+            "or one or more <bash> tags, but not both. Re-issue the action "
+            "with a single action type."
+        )
+        return {"error": [error]}
+    if exit_bodies:
+        return {"exit": exit_bodies}
+    if bash_bodies:
+        return {"bash": bash_bodies}
+    return {"exit": ["No action"]}
 
 
 def run_agent(messages: list[Message], max_turns: int) -> tuple[str, list[Message]]:
-    for _ in range(max_turns):
+    for turn in range(max_turns):
+        if use_color():
+            print(f"{GREY}Turn: {turn}/{max_turns}{RESET}")
+        else:
+            print(f"Turn: {turn}/{max_turns}")
         response = llm_call(messages)
         # print(response)  # the model speaking: the one moment worth watching
         messages.append({"role": "assistant", "content": response})
 
         action = parse_action(response)
         if "exit" in action:
-            return action["exit"], messages
+            return action["exit"][0], messages
+        if "error" in action:
+            # The model mixed action types; tell it why and let it retry.
+            messages.append({"role": "user", "content": action["error"][0]})
+            continue
         if "bash" in action:
-            command = action["bash"]
-            result = subprocess.run(
-                command,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                timeout=120,
-            )
-            observation = f"Output of `$ {command}`:\n{result.stdout[:MAX_OUTPUT_CHARS]}\n(exit code {result.returncode})"
-            messages.append({"role": "user", "content": observation})
+            # One or more commands, executed in turn; every result is fed
+            # back together in a single observation message.
+            observations: list[str] = []
+            for command in action["bash"]:
+                # Show the user which tool is being invoked, in dim grey.
+                if use_color():
+                    print(f"{GREY}$ {command}{RESET}")
+                else:
+                    print(f"$ {command}")
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=120,
+                )
+                observations.append(
+                    f"Output of `$ {command}`:\n{result.stdout[:MAX_OUTPUT_CHARS]}\n(exit code {result.returncode})"
+                )
+            messages.append({"role": "user", "content": "\n\n".join(observations)})
 
     return f"Ran out of turns ({max_turns}) without an <exit> action.", messages
 

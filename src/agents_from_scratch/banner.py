@@ -22,6 +22,7 @@ MAGENTA = rgb("#FF00D4")  # k
 BLUE = rgb("#006FFF")  # a
 LIME = rgb("#A9FF17")  # i
 DIM = "\033[2m"
+GREY = rgb("#888888")  # secondary info (tool calls)
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
