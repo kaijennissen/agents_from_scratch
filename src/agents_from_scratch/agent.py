@@ -118,7 +118,7 @@ def parse_action(text: str) -> dict[str, list[str]]:
         return {"exit": exit_bodies}
     if bash_bodies:
         return {"bash": bash_bodies}
-    return {"exit": ["No action"]}
+    return {"error": ["Couldn't parse any action. Please retry!"]}
 
 
 def run_agent(messages: list[Message], max_turns: int) -> tuple[str, list[Message]]:
