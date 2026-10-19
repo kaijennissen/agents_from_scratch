@@ -66,7 +66,7 @@ async def run(cmd):
 
 
 async def main():
-    cmds = ["sleep 30 && echo hi!", "ls -alh", "ls -alh priv"]
+    cmds = ["for i in 1 2 3 4 5;do echo $i; sleep $i; done", "ls -alh", "ls -alh priv"]
     results = await asyncio.gather(*(run(c) for c in cmds))
     for cmd, result in zip(cmds, results, strict=False):
         print(format_observation(cmd, result), end="\n\n")
@@ -75,6 +75,26 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 
+
+# Next Session:
+# What this means for your design
+# To keep partial output, reading has to happen in a buffer that you own. That buffer has to outlive the cancelled coroutine. Something like this, in words:
+
+# 1. Create two lists (or bytearrays) outside the timed section.
+# 2. Start a reader coroutine per stream. Each reads chunks from proc.stdout or proc.stderr and appends them to its list until EOF.
+# 3. Wrap gather(read_out, read_err, proc.wait()) in wait_for.
+# 4. On timeout, the lists still hold everything read so far, because they live outside the cancelled coroutine.
+#
+# Questions before you write it
+# 1. Which StreamReader method fits the reader loop? Compare readline(), read(n) and read(). What does each do when the command prints a long line without a newline, or
+#    prints a huge amount of data?
+# 2. How does the reader know when to stop? What does read(n) return at EOF?
+# 3. After killpg, do the pipes reach EOF? Think about a background child that survived. Is the kill in finally enough, or does it also matter that it kills the whole
+#    group?
+# 4. Do you still need the call to await proc.wait() inside the gather, or is it enough to call it in finally?
+#
+# Prove it for yourself before writing the real version. In a throwaway script, create a list and a small reader loop for proc.stdout, then time it out with wait_for on
+# the same loop command. Check that the list contains 1 and 2. Then say how you'd put this into run.
 
 # Learnings:
 # - PID: process ID
