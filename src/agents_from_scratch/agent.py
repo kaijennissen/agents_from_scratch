@@ -22,6 +22,7 @@ MODEL = "qwen3.8:27b-mlx"
 
 DEFAULT_MAX_TURNS = 25  # safety net; the agent is meant to stop itself with <exit>
 MAX_OUTPUT_CHARS = 2000  # tool output is context we pay for on every later turn
+COMMAND_TIMEOUT = 120  # seconds; a wall-clock limit per command, not per loop
 
 
 class Message(TypedDict):
@@ -29,8 +30,16 @@ class Message(TypedDict):
     content: str
 
 
-SYSTEM_PROMPT = """You are an autonomous coding agent. You solve the user's task by taking one action at a time: you act, observe the result, then decide the next action.
+SYSTEM_PROMPT = f"""You are an autonomous coding agent. You solve the user's task in turns: you act, observe the results, then decide what to do next.
 Always explore your environment first. You're running on a computer and have access to a file-system as well as a bash-shell.
+
+How the harness works:
+- A turn is one reply from you and one reply from the harness. Every turn re-sends the whole conversation, so fewer turns and smaller outputs are cheaper.
+- Several <bash> tags in one action run in order, and all results come back together in the next message. Use this for commands that don't depend on each other's output, like reading several files or running the tests and the linter. If a command needs the output of another, put them in separate turns. A failing command does not stop the ones after it.
+- Each command runs in a fresh shell. `cd` and `export` do not carry over to the next command. Use absolute paths, or `cd dir && cmd` within one command.
+- Limits: a command is killed after {COMMAND_TIMEOUT}s, and output is cut after {MAX_OUTPUT_CHARS} characters (a marker tells you when). So use `head`, `grep` and `wc -l` instead of dumping large files, and don't start servers, watchers or interactive programs.
+- A reply that is not a valid <action> costs a turn. The harness sends back an error and you retry.
+- <exit> ends your turn and shows your answer to the user, who may reply. If you need clarification, ask it there.
 
 Every reply you send is a single <action> element. It contains either exactly one <exit> tag, or one or more <bash> tags. Do not mix <exit> with <bash> in the same action. Output only the <action> element, with nothing before or after it.
 
@@ -160,16 +169,27 @@ def run_agent(messages: list[Message], max_turns: int) -> tuple[str, list[Messag
                     print(f"{GREY}$ {command}{RESET}")
                 else:
                     print(f"$ {command}")
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    timeout=120,
-                )
+                try:
+                    result = subprocess.run(
+                        command,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        timeout=COMMAND_TIMEOUT,
+                    )
+                except subprocess.TimeoutExpired:
+                    # A hung command must not take the rest of the batch down.
+                    observations.append(
+                        f"Output of `$ {command}`:\n(killed: timed out after {COMMAND_TIMEOUT}s)"
+                    )
+                    continue
+                output = result.stdout
+                if len(output) > MAX_OUTPUT_CHARS:
+                    extra = len(output) - MAX_OUTPUT_CHARS
+                    output = f"{output[:MAX_OUTPUT_CHARS]}\n[output truncated, {extra} more chars]"
                 observations.append(
-                    f"Output of `$ {command}`:\n{result.stdout[:MAX_OUTPUT_CHARS]}\n(exit code {result.returncode})"
+                    f"Output of `$ {command}`:\n{output}\n(exit code {result.returncode})"
                 )
             messages.append({"role": "user", "content": "\n\n".join(observations)})
 
