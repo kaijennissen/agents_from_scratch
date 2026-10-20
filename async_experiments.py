@@ -152,3 +152,31 @@ if __name__ == "__main__":
 # Known limitation
 # - On a timeout, partial output is lost because communicate() is cancelled. Keeping it would mean reading
 #   proc.stdout / proc.stderr ourselves.
+
+
+# ---------------------------------------------------------------------------
+# Shell operators: one after the other vs. all at once
+# ---------------------------------------------------------------------------
+
+# One after the other (sequential):
+# - a ; b    run b after a finishes, whatever a's exit code was
+# - a && b   run b only if a succeeded (exit code 0)   -> use for "do this, then that"
+# - a || b   run b only if a failed (exit code != 0)   -> fallback
+
+# At the same time (concurrent):
+# - a | b    pipe: start a and b together; a's stdout is b's stdin. Passes data, does NOT order the commands.
+#            (the exit code of the pipeline is the exit code of b, unless `set -o pipefail`)
+# - a & b    start a in the background, the shell moves on to b immediately without waiting for a.
+#            A trailing `&` (`a &`) leaves a running after the shell exits.
+
+# Other special characters:
+# - $VAR, $(cmd)   variable / command substitution (expanded by the shell, before the command runs)
+# - * ? {1..3}     globbing / brace expansion (the latter is a bash feature, not POSIX sh)
+# - > file, >> file, 2> file, 2>&1   redirect stdout (overwrite / append), stderr, or stderr into stdout
+# - < file         read stdin from a file
+# - ( a; b )       run a group in a subshell
+# - 'text' "text"  quoting: single = literal, double = $ expansions still happen
+
+# Why it matters here: commands in one <bash> action run concurrently (gather), so they must be independent.
+# If b depends on a, combine them in ONE command with && (e.g. `mkdir foo && touch foo/a`).
+# Check the difference: `time (sleep 2 | sleep 2)` ~2s, `time (sleep 2 && sleep 2)` ~4s.
