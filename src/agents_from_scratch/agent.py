@@ -9,6 +9,7 @@ emits <exit> or the turn budget runs out.
 import argparse
 import re
 import subprocess
+import time
 from typing import TypedDict, cast
 
 import httpx2
@@ -77,14 +78,25 @@ Examples:
 """
 
 
-def llm_call(messages: list[Message]) -> str:
-    r = httpx2.post(
-        OLLAMA_ENDPOINT,
-        json={"model": MODEL, "stream": False, "messages": messages},
-        timeout=120,
-    )
-    r.raise_for_status()
-    return cast(str, r.json()["message"]["content"])
+def llm_call(messages: list[Message], retries: int = 3) -> str:
+    """POST to Ollama, retrying transient failures with exponential backoff."""
+    for attempt in range(retries + 1):
+        try:
+            r = httpx2.post(
+                OLLAMA_ENDPOINT,
+                json={"model": MODEL, "stream": False, "messages": messages},
+                timeout=120,
+            )
+            r.raise_for_status()
+            return cast(str, r.json()["message"]["content"])
+        except (httpx2.TransportError, httpx2.HTTPStatusError) as e:
+            retryable = not isinstance(e, httpx2.HTTPStatusError) or (
+                e.response.status_code >= 500 or e.response.status_code == 429
+            )
+            if attempt == retries or not retryable:
+                raise
+            time.sleep(2**attempt)
+    raise AssertionError("unreachable")
 
 
 def parse_xml(tag: str, string: str) -> list[str]:
@@ -118,7 +130,7 @@ def parse_action(text: str) -> dict[str, list[str]]:
         return {"exit": exit_bodies}
     if bash_bodies:
         return {"bash": bash_bodies}
-    return {"exit": ["No action"]}
+    return {"error": ["Couldn't parse any action. Please retry!"]}
 
 
 def run_agent(messages: list[Message], max_turns: int) -> tuple[str, list[Message]]:

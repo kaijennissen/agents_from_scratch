@@ -29,7 +29,7 @@ def test_parse_xml(tag: str, text: str, expected: list[str]) -> None:
     [
         ("<bash> ls -alh </bash>", "bash"),
         ("<action><bash> ls </bash><exit> Finished! </exit></action>", "error"),
-        ("<unknown> Finished! </unknown>", "exit"),
+        ("<unknown> Finished! </unknown>", "error"),
         ("<exit> Finished! </exit>", "exit"),
     ],
 )
