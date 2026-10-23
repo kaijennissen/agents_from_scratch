@@ -13,6 +13,7 @@ requires-python = ">=3.14.4"
 dependencies = [
     "structlog",
     "httpx2",
+    "textual>=8.2.8",
 ]
 
 [project.scripts]
@@ -24,12 +25,14 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
-    "pyright"
+    "pyright",
+    "pytest-asyncio>=1.4.0",
 ]
 
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 addopts = [
     "--strict-markers",
     "--strict-config",
