@@ -1,10 +1,18 @@
 import asyncio
 import os
 import signal
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Self
+from typing import Literal, Self
 
-TIMEOUT = 2
+from agents_from_scratch.banner import RESET, rgb
+
+TIMEOUT = 30
+
+
+RED = rgb("#FF5555")
+GREEN = rgb("#50FA7B")
+YELLOW = rgb("#FFCC00")
 
 
 @dataclass(frozen=True)
@@ -38,7 +46,45 @@ def format_observation(cmd: str, result: BashResult) -> str:
     )
 
 
-async def run(cmd):
+@dataclass(kw_only=True)
+class ToolEvent:
+    id: tuple[int, int]
+
+
+@dataclass(kw_only=True)
+class ToolStart(ToolEvent):
+    cmd: str
+
+
+@dataclass(kw_only=True)
+class ToolEnd(ToolEvent):
+    returncode: Literal["success", "failure"]
+
+
+def on_event_callback(event: ToolEvent):
+    match event:
+        case ToolStart():
+            print(f"running: {event.cmd}")
+        case ToolEnd():
+            if event.returncode == "success":
+                print(f"success: {event.cmd}")
+            elif event.returncode == "failure":
+                print(f"failure: {event.cmd}")
+        case _:
+            print("Something else")
+
+
+def on_event(event: str, cmd: str) -> None:
+    if event == "success":
+        print(f"{GREEN}success: {cmd}{RESET}")
+    elif event == "failure":
+        print(f"{RED}failure: {cmd}{RESET}")
+    else:
+        print(f"{YELLOW}running: {cmd}{RESET}")
+
+
+async def run_bash_tool(cmd: str, on_event: Callable[[str, str], None] = lambda: None):
+    on_event(event="started", cmd=cmd)
     proc = await asyncio.create_subprocess_shell(
         cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -46,8 +92,11 @@ async def run(cmd):
         start_new_session=True,
     )
     proc_id = proc.pid
+
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT)
+        print(f"{cmd}, {proc.returncode}")
+        on_event(event="success", cmd=cmd)
         return BashResult.completed(
             stdout=stdout.decode(errors="replace"),
             stderr=stderr.decode(errors="replace"),
@@ -55,6 +104,7 @@ async def run(cmd):
         )
 
     except TimeoutError:
+        on_event(event="failure", cmd=cmd)
         return BashResult.timeout()
 
     finally:
@@ -65,9 +115,23 @@ async def run(cmd):
         await proc.wait()
 
 
+# TODO: finish the Tool-class
+
+
+# TODO: write a run_tool function that wraps on_event and tool-call
+# pass dataclasses to on_event instead of strings
+def run_tool(on_event: Callable[ToolEvent, None] = lambda: None):
+    pass
+
+
+# on_event()
+#    tool_call()
+#    on_event()
+
+
 async def main():
     cmds = ["for i in 1 2 3 4 5;do echo $i; sleep $i; done", "ls -alh", "ls -alh priv"]
-    results = await asyncio.gather(*(run(c) for c in cmds))
+    results = await asyncio.gather(*(run_bash_tool(c, on_event=on_event) for c in cmds))
     for cmd, result in zip(cmds, results, strict=False):
         print(format_observation(cmd, result), end="\n\n")
 
