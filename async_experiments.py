@@ -33,19 +33,33 @@ class BashResult:
         return cls(cmd, stdout, stderr, returncode=None, timed_out=True)
 
 
-@dataclass(kw_only=True)
-class ToolEvent:
+@dataclass(frozen=True, kw_only=True)
+class BashCall:
     id: str
-
-
-@dataclass(kw_only=True)
-class ToolStart(ToolEvent):
     cmd: str
 
 
-@dataclass(kw_only=True)
-class ToolResult(ToolEvent):
-    result: BashResult
+@dataclass(frozen=True, kw_only=True)
+class SkillCall:
+    id: str
+    name: str
+
+
+type ToolCall = BashCall | SkillCall
+
+
+@dataclass(frozen=True)
+class ToolStart:
+    call: ToolCall
+
+
+@dataclass(frozen=True)
+class ToolEnd:
+    call: ToolCall
+    result: BashResult | None
+
+
+type ToolEvent = ToolStart | ToolEnd
 
 
 def format_observation(result: BashResult) -> str:
@@ -66,12 +80,12 @@ def format_observation(result: BashResult) -> str:
 def on_event_callback(event: ToolEvent):
     match event:
         case ToolStart():
-            print(f"{YELLOW}running: {event.cmd}{RESET}")
-        case ToolResult():
+            print(f"{YELLOW}running: {event.call.cmd}{RESET}")
+        case ToolEnd():
             if event.result.returncode == 0:
-                print(f"{GREEN}success: {event.result.cmd}{RESET}")
+                print(f"{GREEN}success: {event.call.cmd}{RESET}")
             elif event.result.returncode == 1:
-                print(f"{RED}failure: {event.result.cmd}{RESET}")
+                print(f"{RED}failure: {event.call.cmd}{RESET}")
         case _:
             print(f"{RED}don't know: {event.cmd}{RESET}")
 
@@ -120,13 +134,13 @@ async def run_bash_tool(cmd: str):
 # TODO: write a run_tool function that wraps on_event and tool-call
 # pass dataclasses to on_event instead of strings
 async def run_tool(
-    tool_call,
+    tool_call: ToolCall,
     tool_fn: Callable[ToolEvent, None],
     on_event: Callable[ToolEvent, None] = lambda: None,
 ):
-    on_event(tool_call)
+    on_event(ToolStart(call=tool_call))
     result = await tool_fn(tool_call.cmd)
-    on_event(ToolResult(id=tool_call.id, result=result))
+    on_event(ToolEnd(call=tool_call, result=result))
     return result
 
 
@@ -141,7 +155,7 @@ def create_uuid():
 
 async def main():
     cmds = ["for i in 1 2 3 4 5;do echo $i; sleep $i; done", "ls -alh", "ls -alh priv"]
-    tool_calls = [ToolStart(id=create_uuid(), cmd=cmd) for cmd in cmds]
+    tool_calls = [BashCall(id=create_uuid(), cmd=cmd) for cmd in cmds]
     results = await asyncio.gather(
         *(
             run_tool(
