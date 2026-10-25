@@ -7,11 +7,15 @@ emits <exit> or the turn budget runs out.
 """
 
 import argparse
+import asyncio
 import re
 import subprocess
+from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import TypedDict, cast
 
 import httpx2
+from httpx2 import AsyncClient
 
 from agents_from_scratch.banner import GREY, RESET, print_banner, prompt_text, use_color
 
@@ -77,14 +81,12 @@ Examples:
 """
 
 
-def llm_call(messages: list[Message]) -> str:
-    r = httpx2.post(
-        OLLAMA_ENDPOINT,
-        json={"model": MODEL, "stream": False, "messages": messages},
-        timeout=120,
+async def llm_call(client: AsyncClient, messages: list[Message]) -> str:
+    response = await client.post(
+        "/api/chat", json={"model": MODEL, "stream": False, "messages": messages}
     )
-    r.raise_for_status()
-    return cast(str, r.json()["message"]["content"])
+    response.raise_for_status()
+    return cast(str, response.json()["message"]["content"])
 
 
 def parse_xml(tag: str, string: str) -> list[str]:
@@ -121,13 +123,17 @@ def parse_action(text: str) -> dict[str, list[str]]:
     return {"exit": ["No action"]}
 
 
-def run_agent(messages: list[Message], max_turns: int) -> tuple[str, list[Message]]:
+async def run_agent(
+    messages: list[Message],
+    max_turns: int,
+    llm_call: Callable[[list[Message]], Awaitable[str]],
+) -> tuple[str, list[Message]]:
     for turn in range(max_turns):
         if use_color():
             print(f"{GREY}Turn: {turn}/{max_turns}{RESET}")
         else:
             print(f"Turn: {turn}/{max_turns}")
-        response = llm_call(messages)
+        response = await llm_call(messages)
         # print(response)  # the model speaking: the one moment worth watching
         messages.append({"role": "assistant", "content": response})
 
@@ -164,26 +170,32 @@ def run_agent(messages: list[Message], max_turns: int) -> tuple[str, list[Messag
     return f"Ran out of turns ({max_turns}) without an <exit> action.", messages
 
 
-def main(prompt: str | None, max_turns: int) -> None:
-    stop: bool = False
-    messages: list[Message] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-    ]
+async def main(prompt: str | None, max_turns: int) -> None:
+    async with httpx2.AsyncClient(
+        base_url="http://host.docker.internal:11434", timeout=120
+    ) as client:
+        call = partial(llm_call, client)
+        stop: bool = False
+        messages: list[Message] = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+        ]
 
-    if prompt:
-        messages.append({"role": "user", "content": prompt})
-        answer, _ = run_agent(messages, max_turns=max_turns)
-        print("\n" + answer + "\n")
-    else:
-        print_banner(MODEL)  # interactive only; keeps -p output pipe-clean
-        while not stop:
-            prompt = input(prompt_text())
-            if prompt == "exit":
-                stop = True
-            else:
-                messages.append({"role": "user", "content": prompt})
-                answer, messages = run_agent(messages, max_turns=max_turns)
-                print("\n" + answer + "\n")
+        if prompt:
+            messages.append({"role": "user", "content": prompt})
+            answer, _ = await run_agent(messages, max_turns=max_turns, llm_call=call)
+            print("\n" + answer + "\n")
+        else:
+            print_banner(MODEL)  # interactive only; keeps -p output pipe-clean
+            while not stop:
+                prompt = input(prompt_text())
+                if prompt == "exit":
+                    stop = True
+                else:
+                    messages.append({"role": "user", "content": prompt})
+                    answer, messages = await run_agent(
+                        messages, max_turns=max_turns, llm_call=call
+                    )
+                    print("\n" + answer + "\n")
 
 
 def cli() -> None:
@@ -198,7 +210,7 @@ def cli() -> None:
     )
     args = parser.parse_args()
 
-    main(prompt=args.prompt, max_turns=args.max_turns)
+    asyncio.run(main(prompt=args.prompt, max_turns=args.max_turns))
 
 
 if __name__ == "__main__":
