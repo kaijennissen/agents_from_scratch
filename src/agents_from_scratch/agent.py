@@ -126,14 +126,14 @@ def parse_action(text: str) -> dict[str, list[str]]:
 async def run_agent(
     messages: list[Message],
     max_turns: int,
-    llm_call: Callable[[list[Message]], Awaitable[str]],
+    call: Callable[[list[Message]], Awaitable[str]],
 ) -> tuple[str, list[Message]]:
     for turn in range(max_turns):
         if use_color():
             print(f"{GREY}Turn: {turn}/{max_turns}{RESET}")
         else:
             print(f"Turn: {turn}/{max_turns}")
-        response = await llm_call(messages)
+        response = await call(messages)
         # print(response)  # the model speaking: the one moment worth watching
         messages.append({"role": "assistant", "content": response})
 
@@ -182,7 +182,7 @@ async def main(prompt: str | None, max_turns: int) -> None:
 
         if prompt:
             messages.append({"role": "user", "content": prompt})
-            answer, _ = await run_agent(messages, max_turns=max_turns, llm_call=call)
+            answer, _ = await run_agent(messages, max_turns=max_turns, call=call)
             print("\n" + answer + "\n")
         else:
             print_banner(MODEL)  # interactive only; keeps -p output pipe-clean
@@ -193,7 +193,7 @@ async def main(prompt: str | None, max_turns: int) -> None:
                 else:
                     messages.append({"role": "user", "content": prompt})
                     answer, messages = await run_agent(
-                        messages, max_turns=max_turns, llm_call=call
+                        messages, max_turns=max_turns, call=call
                     )
                     print("\n" + answer + "\n")
 
