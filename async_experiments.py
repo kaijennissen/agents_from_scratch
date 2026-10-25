@@ -276,3 +276,38 @@ if __name__ == "__main__":
 # Why it matters here: commands in one <bash> action run concurrently (gather), so they must be independent.
 # If b depends on a, combine them in ONE command with && (e.g. `mkdir foo && touch foo/a`).
 # Check the difference: `time (sleep 2 | sleep 2)` ~2s, `time (sleep 2 && sleep 2)` ~4s.
+
+
+# ---------------------------------------------------------------------------
+# Async function vs. coroutine (and how to type them)
+# ---------------------------------------------------------------------------
+
+# Vocabulary (say "async function", not "coroutine function")
+# - Async function: anything defined with `async def`, e.g. llm_call.
+#   `call = partial(llm_call, client)` is also an async function, with the client already filled in.
+# - Coroutine: the object you get when you CALL an async function, e.g. `call(messages)`.
+#   Calling does not run the body. The body only runs when the coroutine is awaited.
+# - Rule: "async function" = the thing you call, "coroutine" = the thing you await.
+#   Test: if you can put (...) after it, it is a function. A coroutine can only be awaited, not called.
+# - `await call(messages)`: await applies to `call(messages)` (with the parentheses), never to `call` alone.
+# - Bug from this session: `cli()` was called but never awaited -> "coroutine 'cli' was never awaited".
+#   Fix: a normal `def cli()` that calls `asyncio.run(main(...))` once.
+
+# Types
+# - `call` (the async function):  Callable[[list[Message]], Awaitable[str]]
+# - `call(messages)` (the coroutine) is described by the second part: Awaitable[str]
+# - `await call(messages)` is a str
+# - Coroutine[YieldType, SendType, ReturnType] describes only the coroutine, never the async function.
+#   Yield/send = how the event loop suspends and resumes it (implementation detail, usually Any, Any).
+#   Return = what `await` gives back. That is the only slot that matters in our code.
+#   Writing only two parameters leaves the return type Unknown (that was the pyright error).
+# - run_agent takes `Awaitable[str]` and not Coroutine[Any, Any, str]: it only needs to await the result,
+#   so any async function fits (also one that returns a Future).
+# - A coroutine is an Awaitable, but not every Awaitable is a coroutine (a Future is awaitable too).
+
+# Client creation (httpx2)
+# - Create ONE AsyncClient in main (`async with`) and bind it with partial(llm_call, client).
+#   run_agent never sees the client, only `call`. Reasons: connection reuse, tests can inject a fake,
+#   the client's lifetime is visible, and switching provider changes only llm_call.
+# - httpx2.AsyncClient and client.post have no `retries` argument (checked, httpx2 2.13.1).
+#   `retries` exists on httpx2.AsyncHTTPTransport and only retries connect failures (not read timeouts, not 5xx).
