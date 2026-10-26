@@ -8,16 +8,34 @@ emits <exit> or the turn budget runs out.
 
 import argparse
 import asyncio
+import os
 import re
-import subprocess
+import signal
+import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from functools import partial
-from typing import TypedDict, cast
+from typing import Self, TypedDict, assert_never, cast
 
 import httpx2
 from httpx2 import AsyncClient
 
-from agents_from_scratch.banner import GREY, RESET, print_banner, prompt_text, use_color
+from agents_from_scratch.banner import (
+    GREY,
+    RESET,
+    print_banner,
+    prompt_text,
+    rgb,
+    use_color,
+)
+
+TIMEOUT = 3
+
+
+RED = rgb("#FF5555")
+GREEN = rgb("#50FA7B")
+YELLOW = rgb("#FFCC00")
+
 
 # OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
 OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
@@ -25,12 +43,6 @@ MODEL = "qwen3.8:27b-mlx"
 
 DEFAULT_MAX_TURNS = 25  # safety net; the agent is meant to stop itself with <exit>
 MAX_OUTPUT_CHARS = 2000  # tool output is context we pay for on every later turn
-
-
-class Message(TypedDict):
-    role: str
-    content: str
-
 
 SYSTEM_PROMPT = """You are an autonomous coding agent. You solve the user's task by taking one action at a time: you act, observe the result, then decide the next action.
 Always explore your environment first. You're running on a computer and have access to a file-system as well as a bash-shell.
@@ -81,6 +93,78 @@ Examples:
 """
 
 
+class Message(TypedDict):
+    role: str
+    content: str
+
+
+@dataclass(frozen=True)
+class BashResult:
+    cmd: str
+    stdout: str
+    stderr: str
+    returncode: int | None
+    timed_out: bool
+
+    @classmethod
+    def completed(
+        cls, cmd: str, stdout: str, stderr: str, returncode: int | None
+    ) -> Self:
+        return cls(cmd, stdout, stderr, returncode, timed_out=False)
+
+    @classmethod
+    def timeout(cls, cmd: str, stdout: str = "", stderr: str = "") -> Self:
+        return cls(cmd, stdout, stderr, returncode=None, timed_out=True)
+
+
+@dataclass(frozen=True, kw_only=True)
+class BashCall:
+    id: str
+    cmd: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class SkillCall:
+    id: str
+    name: str
+
+
+type ToolCall = BashCall
+
+
+@dataclass(frozen=True)
+class ToolStart:
+    call: ToolCall
+
+
+@dataclass(frozen=True)
+class ToolEnd:
+    call: ToolCall
+    result: BashResult
+
+
+type ToolEvent = ToolStart | ToolEnd
+
+
+def create_uuid():
+    return str(uuid.uuid4()).split("-")[0]
+
+
+def format_observation(result: BashResult) -> str:
+    """Turn a BashResult into the text the model reads."""
+    if result.timed_out:
+        return (
+            f"Command `{result.cmd}` was killed after a timeout of {TIMEOUT} seconds. "
+            "It did not finish, so its result and side effects are unknown, "
+            "and any output it produced was discarded."
+        )
+    return (
+        f"Command `{result.cmd}` finished with exit code {result.returncode}.\n"
+        f'stdout: "{result.stdout}"\n'
+        f'stderr: "{result.stderr}"'
+    )
+
+
 async def llm_call(client: AsyncClient, messages: list[Message]) -> str:
     response = await client.post(
         "/api/chat", json={"model": MODEL, "stream": False, "messages": messages}
@@ -123,6 +207,64 @@ def parse_action(text: str) -> dict[str, list[str]]:
     return {"exit": ["No action"]}
 
 
+def on_event(event: ToolEvent):
+    match event:
+        case ToolStart(call=BashCall(cmd=cmd)):
+            print(f"{YELLOW}running: {cmd}{RESET}")
+
+        case ToolEnd(call=BashCall(cmd=cmd), result=BashResult(returncode=0)):
+            print(f"{GREEN}success: {cmd}{RESET}")
+        case ToolEnd(call=BashCall(cmd=cmd), result=BashResult(timed_out=True)):
+            print(f"{RED}timeout: {cmd}{RESET}")
+        case ToolEnd(call=BashCall(cmd=cmd), result=BashResult(returncode=code)):
+            print(f"{RED}failure (exit {code}): {cmd}{RESET}")
+        case _:
+            assert_never(event)
+
+
+async def run_bash_tool(cmd: str):
+    proc = await asyncio.create_subprocess_shell(
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    proc_id = proc.pid
+
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT)
+        return BashResult.completed(
+            cmd=cmd,
+            stdout=stdout.decode(errors="replace"),
+            stderr=stderr.decode(errors="replace"),
+            returncode=proc.returncode,
+        )
+
+    except TimeoutError:
+        return BashResult.timeout(cmd)
+
+    finally:
+        try:
+            os.killpg(proc_id, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await proc.wait()
+
+
+def _ignore(_: ToolEvent) -> None: ...
+
+
+async def run_tool(
+    tool_call: ToolCall,
+    tool_fn: Callable[[str], Awaitable[BashResult]],
+    on_event: Callable[[ToolEvent], None] = _ignore,
+):
+    on_event(ToolStart(call=tool_call))
+    result = await tool_fn(tool_call.cmd)
+    on_event(ToolEnd(call=tool_call, result=result))
+    return result
+
+
 async def run_agent(
     messages: list[Message],
     max_turns: int,
@@ -133,6 +275,7 @@ async def run_agent(
             print(f"{GREY}Turn: {turn}/{max_turns}{RESET}")
         else:
             print(f"Turn: {turn}/{max_turns}")
+
         response = await call(messages)
         # print(response)  # the model speaking: the one moment worth watching
         messages.append({"role": "assistant", "content": response})
@@ -144,27 +287,19 @@ async def run_agent(
             # The model mixed action types; tell it why and let it retry.
             messages.append({"role": "user", "content": action["error"][0]})
             continue
+
         if "bash" in action:
             # One or more commands, executed in turn; every result is fed
             # back together in a single observation message.
-            observations: list[str] = []
-            for command in action["bash"]:
-                # Show the user which tool is being invoked, in dim grey.
-                if use_color():
-                    print(f"{GREY}$ {command}{RESET}")
-                else:
-                    print(f"$ {command}")
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    timeout=120,
+            tool_calls = [BashCall(id=create_uuid(), cmd=cmd) for cmd in action["bash"]]
+            results = await asyncio.gather(
+                *(
+                    run_tool(tool_call, tool_fn=run_bash_tool, on_event=on_event)
+                    for tool_call in tool_calls
                 )
-                observations.append(
-                    f"Output of `$ {command}`:\n{result.stdout[:MAX_OUTPUT_CHARS]}\n(exit code {result.returncode})"
-                )
+            )
+
+            observations = [format_observation(result) for result in results]
             messages.append({"role": "user", "content": "\n\n".join(observations)})
 
     return f"Ran out of turns ({max_turns}) without an <exit> action.", messages
