@@ -26,7 +26,6 @@ from agents_from_scratch.banner import (
     print_banner,
     prompt_text,
     rgb,
-    use_color,
 )
 
 TIMEOUT = 3
@@ -143,7 +142,18 @@ class ToolEnd:
     result: BashResult
 
 
-type ToolEvent = ToolStart | ToolEnd
+@dataclass(frozen=True)
+class ToolCancelled:
+    call: ToolCall
+
+
+type ToolEvent = ToolStart | ToolEnd | ToolCancelled | TurnStart
+
+
+@dataclass(frozen=True)
+class TurnStart:
+    turn: int
+    max_turns: int
 
 
 def create_uuid():
@@ -209,6 +219,8 @@ def parse_action(text: str) -> dict[str, list[str]]:
 
 def on_event(event: ToolEvent):
     match event:
+        case TurnStart(turn=turn, max_turns=max_turns):
+            print(f"{GREY}Turn: {turn}/{max_turns}{RESET}")
         case ToolStart(call=BashCall(cmd=cmd)):
             print(f"{YELLOW}running: {cmd}{RESET}")
 
@@ -218,6 +230,8 @@ def on_event(event: ToolEvent):
             print(f"{RED}timeout: {cmd}{RESET}")
         case ToolEnd(call=BashCall(cmd=cmd), result=BashResult(returncode=code)):
             print(f"{RED}failure (exit {code}): {cmd}{RESET}")
+        case ToolCancelled(call=BashCall(cmd=cmd)):
+            print(f"{RED}cancelled: {cmd}{RESET}")
         case _:
             assert_never(event)
 
@@ -260,7 +274,11 @@ async def run_tool(
     on_event: Callable[[ToolEvent], None] = _ignore,
 ):
     on_event(ToolStart(call=tool_call))
-    result = await tool_fn(tool_call.cmd)
+    try:
+        result = await tool_fn(tool_call.cmd)
+    except asyncio.CancelledError:
+        on_event(ToolCancelled(call=tool_call))
+        raise
     on_event(ToolEnd(call=tool_call, result=result))
     return result
 
@@ -269,23 +287,25 @@ async def run_agent(
     messages: list[Message],
     max_turns: int,
     call: Callable[[list[Message]], Awaitable[str]],
+    on_event: Callable[[ToolEvent], None] = _ignore,
 ) -> tuple[str, list[Message]]:
     for turn in range(max_turns):
-        if use_color():
-            print(f"{GREY}Turn: {turn}/{max_turns}{RESET}")
-        else:
-            print(f"Turn: {turn}/{max_turns}")
+        on_event(TurnStart(turn, max_turns))
 
         response = await call(messages)
         # print(response)  # the model speaking: the one moment worth watching
-        messages.append({"role": "assistant", "content": response})
+        # not yet appended to messages such that a failure in executing the bash calls doesn't leave the agent in a partial state.
+        assistant_msg: Message = {"role": "assistant", "content": response}
 
         action = parse_action(response)
         if "exit" in action:
+            messages += [assistant_msg]
             return action["exit"][0], messages
         if "error" in action:
             # The model mixed action types; tell it why and let it retry.
-            messages.append({"role": "user", "content": action["error"][0]})
+            messages.extend(
+                [assistant_msg, {"role": "user", "content": action["error"][0]}]
+            )
             continue
 
         if "bash" in action:
@@ -300,7 +320,12 @@ async def run_agent(
             )
 
             observations = [format_observation(result) for result in results]
-            messages.append({"role": "user", "content": "\n\n".join(observations)})
+            messages.extend(
+                [
+                    assistant_msg,
+                    {"role": "user", "content": "\n\n".join(observations)},
+                ]
+            )
 
     return f"Ran out of turns ({max_turns}) without an <exit> action.", messages
 
@@ -317,7 +342,9 @@ async def main(prompt: str | None, max_turns: int) -> None:
 
         if prompt:
             messages.append({"role": "user", "content": prompt})
-            answer, _ = await run_agent(messages, max_turns=max_turns, call=call)
+            answer, _ = await run_agent(
+                messages, max_turns=max_turns, call=call, on_event=on_event
+            )
             print("\n" + answer + "\n")
         else:
             print_banner(MODEL)  # interactive only; keeps -p output pipe-clean
@@ -328,7 +355,7 @@ async def main(prompt: str | None, max_turns: int) -> None:
                 else:
                     messages.append({"role": "user", "content": prompt})
                     answer, messages = await run_agent(
-                        messages, max_turns=max_turns, call=call
+                        messages, max_turns=max_turns, call=call, on_event=on_event
                     )
                     print("\n" + answer + "\n")
 
