@@ -93,6 +93,13 @@ Examples:
 """
 
 
+MIXED_ACTIONS_ERROR = (
+    "Invalid action: a turn may contain either a single <exit> tag "
+    "or one or more <bash> tags, but not both. Re-issue the action "
+    "with a single action type."
+)
+
+
 class Message(TypedDict):
     role: str
     content: str
@@ -206,12 +213,7 @@ def parse_action(text: str) -> dict[str, list[str]]:
         # Mixing the two action types is not allowed. Signal the mistake as
         # an error so the loop can feed it back and the model can retry,
         # rather than silently terminating.
-        error = (
-            "Invalid action: a turn may contain either a single <exit> tag "
-            "or one or more <bash> tags, but not both. Re-issue the action "
-            "with a single action type."
-        )
-        return {"error": [error]}
+        return {"error": [MIXED_ACTIONS_ERROR]}
     if exit_bodies:
         return {"exit": exit_bodies}
     if bash_bodies:

@@ -1,8 +1,8 @@
-"""Minimal regression tests for the agent's XML action parsing."""
+"""Regression tests for the agent's XML action parsing."""
 
 import pytest
 
-from agents_from_scratch.agent import parse_action, parse_xml
+from agents_from_scratch.agent import MIXED_ACTIONS_ERROR, parse_action, parse_xml
 
 
 @pytest.mark.parametrize(
@@ -16,25 +16,28 @@ from agents_from_scratch.agent import parse_action, parse_xml
             "<action><bash> ls </bash><bash>pwd</bash></action>",
             ["<bash> ls </bash><bash>pwd</bash>"],
         ),
+        ("bash", "<bash>\n  cd src &&\n  ls\n</bash>", ["cd src &&\n  ls"]),
+        ("bash", "<exit>done</exit>", []),
+        ("bash", "<bash>ls", []),
+        ("bash", "<bash></bash>", [""]),  # pins current behaviour, not a wish
     ],
 )
 def test_parse_xml(tag: str, text: str, expected: list[str]) -> None:
-    result = parse_xml(tag, text)
-    assert len(result) == len(expected)
-    assert set(result) == set(expected)
+    """Contents come back in order of appearance, stripped at the edges only."""
+    assert parse_xml(tag, text) == expected
 
 
 @pytest.mark.parametrize(
-    "text,expected_key",
+    "text,expected",
     [
-        ("<bash> ls -alh </bash>", "bash"),
-        ("<action><bash> ls </bash><exit> Finished! </exit></action>", "error"),
-        ("<unknown> Finished! </unknown>", "exit"),
-        ("<exit> Finished! </exit>", "exit"),
+        ("<bash>ls</bash><bash>pwd</bash>", {"bash": ["ls", "pwd"]}),
+        ("<exit> done </exit>", {"exit": ["done"]}),
+        ("<unknown> Finished! </unknown>", {"exit": ["No action"]}),
+        ("Sure!\n<action><bash>ls</bash></action>\nHope it helps.", {"bash": ["ls"]}),
+        ("<bash>ls</bash><exit>done</exit>", {"error": [MIXED_ACTIONS_ERROR]}),
+        ("<exit>done</exit><bash>ls</bash>", {"error": [MIXED_ACTIONS_ERROR]}),
     ],
 )
-def test_parse_action(text: str, expected_key: str) -> None:
-    """One action per turn is the contract; exit wins if the model breaks it."""
-    keys = parse_action(text).keys()
-    assert len(keys) == 1
-    assert expected_key in keys
+def test_parse_action(text: str, expected: dict[str, list[str]]) -> None:
+    """One action type per turn; mixing is an error, an unknown reply a clean exit."""
+    assert parse_action(text) == expected
