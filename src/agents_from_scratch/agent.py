@@ -8,6 +8,7 @@ emits <exit> or the turn budget runs out.
 
 import argparse
 import asyncio
+import logging
 import os
 import re
 import signal
@@ -268,18 +269,29 @@ async def run_bash_tool(cmd: str):
 def _ignore(_: ToolEvent) -> None: ...
 
 
+def emit(on_event: Callable[[ToolEvent], None], event: ToolEvent) -> None:
+    """Call the front end's callback; a broken callback must not kill the agent.
+
+    Catches Exception, not BaseException, so CancelledError still passes through.
+    """
+    try:
+        on_event(event)
+    except Exception:
+        logging.exception("on_event failed")
+
+
 async def run_tool(
     tool_call: ToolCall,
     tool_fn: Callable[[str], Awaitable[BashResult]],
     on_event: Callable[[ToolEvent], None] = _ignore,
 ):
-    on_event(ToolStart(call=tool_call))
+    emit(on_event, ToolStart(call=tool_call))
     try:
         result = await tool_fn(tool_call.cmd)
     except asyncio.CancelledError:
-        on_event(ToolCancelled(call=tool_call))
+        emit(on_event, ToolCancelled(call=tool_call))
         raise
-    on_event(ToolEnd(call=tool_call, result=result))
+    emit(on_event, ToolEnd(call=tool_call, result=result))
     return result
 
 
@@ -290,7 +302,7 @@ async def run_agent(
     on_event: Callable[[ToolEvent], None] = _ignore,
 ) -> tuple[str, list[Message]]:
     for turn in range(max_turns):
-        on_event(TurnStart(turn, max_turns))
+        emit(on_event, TurnStart(turn, max_turns))
 
         response = await call(messages)
         # print(response)  # the model speaking: the one moment worth watching
