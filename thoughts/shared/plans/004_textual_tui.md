@@ -59,6 +59,9 @@ Textual limitations: no pixel graphics and no GUI-style mouse text selection. Ne
 2. Prefer an async HTTP client for `llm_call` over `asyncio.to_thread`. A cancelled `to_thread` call keeps running, so Esc would not stop the request. An async client cancels cleanly and allows streaming later.
 3. `run_agent(history, ...) -> new messages`. No `input()` and no `print`.
 4. `llm_call` and the tool runner are injectable. Tests use fakes, and Textual's `Pilot` can drive the app without a network.
+5. LLM failures raise one core type, `LlmError` (see 003, *LLM failures*). The worker catches it, shows the message,
+   and re-enables the input in `finally`. Required for v1: an uncaught exception in a Textual worker exits the whole
+   app by default. Retries with a retry event come later.
 
 ## v2
 

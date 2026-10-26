@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import signal
+import sys
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -184,12 +185,34 @@ def format_observation(result: BashResult) -> str:
     )
 
 
+class LlmError(Exception):
+    """The model gave no usable reply. The message is meant for the user.
+
+    Front ends catch this one type and keep the session alive; the history is
+    unchanged by the failed call, so the same run can simply be retried.
+    """
+
+
 async def llm_call(client: AsyncClient, messages: list[Message]) -> str:
-    response = await client.post(
-        "/api/chat", json={"model": MODEL, "stream": False, "messages": messages}
-    )
-    response.raise_for_status()
-    return cast(str, response.json()["message"]["content"])
+    """Ask Ollama for the next reply; every failure is raised as LlmError."""
+    try:
+        response = await client.post(
+            "/api/chat", json={"model": MODEL, "stream": False, "messages": messages}
+        )
+    except httpx2.HTTPError as e:
+        raise LlmError(f"Could not reach the model: {e}") from e
+
+    if response.is_error:
+        try:
+            detail = response.json()["error"]  # Ollama puts its reason here
+        except ValueError, KeyError, TypeError:
+            detail = response.text
+        raise LlmError(f"Model request failed ({response.status_code}): {detail}")
+
+    try:
+        return cast(str, response.json()["message"]["content"])
+    except (ValueError, KeyError, TypeError) as e:
+        raise LlmError(f"Unexpected reply from the model: {response.text}") from e
 
 
 def parse_xml(tag: str, string: str) -> list[str]:
@@ -357,9 +380,12 @@ async def main(prompt: str | None, max_turns: int) -> None:
 
         if prompt:
             messages.append({"role": "user", "content": prompt})
-            answer, _ = await run_agent(
-                messages, max_turns=max_turns, call=call, on_event=print_event
-            )
+            try:
+                answer, _ = await run_agent(
+                    messages, max_turns=max_turns, call=call, on_event=print_event
+                )
+            except LlmError as e:
+                sys.exit(f"{RED}{e}{RESET}")  # one-shot: report and fail
             print("\n" + answer + "\n")
         else:
             print_banner(MODEL)  # interactive only; keeps -p output pipe-clean
@@ -369,9 +395,18 @@ async def main(prompt: str | None, max_turns: int) -> None:
                     stop = True
                 else:
                     messages.append({"role": "user", "content": prompt})
-                    answer, messages = await run_agent(
-                        messages, max_turns=max_turns, call=call, on_event=print_event
-                    )
+                    try:
+                        answer, messages = await run_agent(
+                            messages,
+                            max_turns=max_turns,
+                            call=call,
+                            on_event=print_event,
+                        )
+                    except LlmError as e:
+                        # Keep the session: history is still valid, so the
+                        # user can say "try again" or wait for the model.
+                        print(f"{RED}{e}{RESET}")
+                        continue
                     print("\n" + answer + "\n")
 
 

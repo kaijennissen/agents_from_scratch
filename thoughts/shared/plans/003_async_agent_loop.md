@@ -37,9 +37,11 @@ type RunTool  = Callable[[str], Awaitable[BashResult]]
 type LlmCall  = Callable[[list[Message]], Awaitable[str]]
 
 # core
+class LlmError(Exception): ...                                # message is meant for the user
+
 async def llm_call(client: httpx2.AsyncClient, messages) -> str:
+    # network error, 4xx/5xx or malformed reply -> raise LlmError(...) from e
     r = await client.post(ENDPOINT, json={...})
-    r.raise_for_status()                                     # errors propagate to the caller
     return r.json()["message"]["content"]
 
 async def run_agent(
@@ -114,7 +116,7 @@ class AgentApp(App):
             answer, self.messages = await run_agent(self.messages, 25,
                                                     llm_call=partial(llm_call, self.client),
                                                     on_event=self.on_event)
-        except httpx2.HTTPError as e:
+        except LlmError as e:
             self.show_error(e)
         finally:
             self.clear_working_status()
@@ -141,6 +143,39 @@ class AgentApp(App):
   finish (see pseudo-code).
 - **LLM errors raise out of `run_agent`.** The caller (CLI or TUI worker) catches them and shows them. The TUI must
   clear its "Working…" status in `finally`.
+
+## LLM failures
+
+A failed LLM call (model unavailable, network down, server error) is shown to the user and never ends the session.
+The user can retry later or, in the future, pick another model.
+
+- **One error type: `LlmError`** (core). The provider turns every failure into it with `raise LlmError(...) from e`:
+  `httpx2.HTTPError` (network, timeout), non-2xx status, and malformed replies. Front ends catch only `LlmError`
+  and need no knowledge of httpx or the provider. The message is readable as is (Ollama's `{"error": ...}` text
+  when available, e.g. "model 'x' not found").
+- **Cancellation is not an error.** `asyncio.CancelledError` is a `BaseException`, so `except LlmError` (or even
+  `except Exception`) never swallows Esc.
+- **Retrying is free for the history.** A failed call happens before anything of that turn is appended, so the
+  history stays valid and the same `run_agent(messages)` can simply run again.
+- CLI: interactive mode prints the error and keeps the session; `-p` prints it and exits non-zero.
+
+### Retries (later, not needed for TUI v1)
+
+`main` retries 3 times with exponential backoff. Port it with these changes:
+
+- Retry only transient failures: transport errors (connect, timeout), 5xx, 429. Other 4xx (404 = model not found,
+  401) fail the same way again and are raised at once.
+- Wait with `await asyncio.sleep`, never `time.sleep` (it would freeze the TUI and ignore cancel).
+- Each retry is reported as an event (e.g. `LlmRetry(attempt, error, delay)`), so the user sees why nothing happens.
+- Delays are a parameter, so tests don't wait.
+
+Open: where the retry loop lives.
+
+- **Inside `llm_call`:** simplest, and it sees status codes to decide what is retryable. But it then needs
+  `on_event`, and every new provider repeats the loop.
+- **Wrapper `with_retries(call, on_event, delays) -> LlmCall`:** provider stays thin, loop and event are written once
+  and testable with a fake `LlmCall`. Needs the provider to say what is retryable, e.g. `LlmError(..., retryable=True)`.
+- Leaning: inside `llm_call` while there is one provider; move to the wrapper together with `providers.py`.
 
 ## Tool execution (prototype: `async_experiments.py`)
 
