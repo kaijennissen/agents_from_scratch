@@ -1,8 +1,56 @@
-"""The observation text is all the model ever learns about a command."""
+"""Running bash commands, and the observation text the model reads about them."""
+
+import asyncio
+import time
+from pathlib import Path
 
 import pytest
 
-from agents_from_scratch.agent import TIMEOUT, BashResult, format_observation
+from agents_from_scratch import agent
+from agents_from_scratch.agent import (
+    TIMEOUT,
+    BashResult,
+    format_observation,
+    run_bash_tool,
+)
+
+
+@pytest.mark.parametrize(
+    "cmd,stdout,stderr,returncode",
+    [
+        ("echo out; echo err >&2; exit 3", "out\n", "err\n", 3),
+        (r"printf '\377'", "\ufffd", "", 0),  # not valid UTF-8
+    ],
+)
+async def test_run_bash_tool_keeps_streams_apart(
+    cmd: str, stdout: str, stderr: str, returncode: int
+) -> None:
+    result = await run_bash_tool(cmd)
+
+    assert result == BashResult.completed(cmd, stdout, stderr, returncode)
+
+
+async def test_run_bash_tool_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agent, "TIMEOUT", 0.1)
+    start = time.monotonic()
+
+    result = await run_bash_tool("sleep 5")
+
+    assert result == BashResult.timeout("sleep 5")
+    assert time.monotonic() - start < 1
+
+
+async def test_run_bash_tool_timeout_kills_child_processes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Killing only the shell would leave its children running unseen."""
+    monkeypatch.setattr(agent, "TIMEOUT", 0.1)
+    marker = tmp_path / "marker"
+
+    await run_bash_tool(f"(sleep 0.3; touch {marker}) & wait")
+    await asyncio.sleep(0.5)
+
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize(
