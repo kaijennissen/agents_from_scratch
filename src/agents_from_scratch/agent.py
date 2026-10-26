@@ -148,7 +148,8 @@ class ToolCancelled:
     call: ToolCall
 
 
-type ToolEvent = ToolStart | ToolEnd | ToolCancelled | TurnStart
+type Event = ToolStart | ToolEnd | ToolCancelled | TurnStart
+type OnEvent = Callable[[Event], None]  # plain def, must return immediately
 
 
 @dataclass(frozen=True)
@@ -218,7 +219,7 @@ def parse_action(text: str) -> dict[str, list[str]]:
     return {"exit": ["No action"]}
 
 
-def on_event(event: ToolEvent):
+def print_event(event: Event) -> None:
     match event:
         case TurnStart(turn=turn, max_turns=max_turns):
             print(f"{GREY}Turn: {turn}/{max_turns}{RESET}")
@@ -266,10 +267,10 @@ async def run_bash_tool(cmd: str):
         await proc.wait()
 
 
-def _ignore(_: ToolEvent) -> None: ...
+def _ignore(_: Event) -> None: ...
 
 
-def emit(on_event: Callable[[ToolEvent], None], event: ToolEvent) -> None:
+def emit(on_event: OnEvent, event: Event) -> None:
     """Call the front end's callback; a broken callback must not kill the agent.
 
     Catches Exception, not BaseException, so CancelledError still passes through.
@@ -283,7 +284,7 @@ def emit(on_event: Callable[[ToolEvent], None], event: ToolEvent) -> None:
 async def run_tool(
     tool_call: ToolCall,
     tool_fn: Callable[[str], Awaitable[BashResult]],
-    on_event: Callable[[ToolEvent], None] = _ignore,
+    on_event: OnEvent = _ignore,
 ):
     emit(on_event, ToolStart(call=tool_call))
     try:
@@ -299,7 +300,7 @@ async def run_agent(
     messages: list[Message],
     max_turns: int,
     call: Callable[[list[Message]], Awaitable[str]],
-    on_event: Callable[[ToolEvent], None] = _ignore,
+    on_event: OnEvent = _ignore,
 ) -> tuple[str, list[Message]]:
     for turn in range(max_turns):
         emit(on_event, TurnStart(turn, max_turns))
@@ -355,7 +356,7 @@ async def main(prompt: str | None, max_turns: int) -> None:
         if prompt:
             messages.append({"role": "user", "content": prompt})
             answer, _ = await run_agent(
-                messages, max_turns=max_turns, call=call, on_event=on_event
+                messages, max_turns=max_turns, call=call, on_event=print_event
             )
             print("\n" + answer + "\n")
         else:
@@ -367,7 +368,7 @@ async def main(prompt: str | None, max_turns: int) -> None:
                 else:
                     messages.append({"role": "user", "content": prompt})
                     answer, messages = await run_agent(
-                        messages, max_turns=max_turns, call=call, on_event=on_event
+                        messages, max_turns=max_turns, call=call, on_event=print_event
                     )
                     print("\n" + answer + "\n")
 
