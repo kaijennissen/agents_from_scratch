@@ -4,7 +4,17 @@ import asyncio
 
 import pytest
 
-from agents_from_scratch.agent import Event, TurnStart, emit
+from agents_from_scratch.agent import (
+    BashCall,
+    BashResult,
+    Event,
+    ToolCancelled,
+    ToolEnd,
+    ToolStart,
+    TurnStart,
+    emit,
+    run_tool,
+)
 
 EVENT = TurnStart(turn=0, max_turns=1)
 
@@ -34,3 +44,35 @@ def test_emit_lets_cancellation_through() -> None:
 
     with pytest.raises(asyncio.CancelledError):
         emit(cancelled, EVENT)
+
+
+async def test_run_tool_reports_start_and_end() -> None:
+    call = BashCall(id="1", cmd="ls")
+    result = BashResult.completed("ls", stdout="a.py", stderr="", returncode=0)
+    events: list[Event] = []
+
+    async def tool(_: str) -> BashResult:
+        return result
+
+    assert await run_tool(call, tool, events.append) == result
+    assert events == [ToolStart(call), ToolEnd(call, result)]
+
+
+async def test_run_tool_reports_cancellation() -> None:
+    """A cancelled command still ends its row, so no bullet stays 'running'."""
+    call = BashCall(id="1", cmd="sleep 999")
+    started = asyncio.Event()
+    events: list[Event] = []
+
+    async def hang(_: str) -> BashResult:
+        started.set()
+        await asyncio.Event().wait()  # never set
+        raise AssertionError("unreachable")
+
+    task = asyncio.create_task(run_tool(call, hang, events.append))
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert events == [ToolStart(call), ToolCancelled(call)]

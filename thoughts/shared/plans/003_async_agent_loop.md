@@ -259,6 +259,10 @@ def openrouter(client, model, api_key) -> LlmCall: ...    # POST /chat/completio
 - Partial output on timeout: read the streams into our own buffers (notes in `async_experiments.py`).
 - Streaming `llm_call` (tokens, reasoning toggle).
 - Persistent shell state (e.g. working directory).
+- A tool runner that raises instead of returning a `BashResult` (not a failed command, which is a normal result,
+  but Python failing to start it, e.g. `ValueError` for a null byte in the command). Today the row gets no end event,
+  `gather` aborts the turn, and sibling tools keep running unawaited. Options: catch in `run_tool` and emit a
+  `ToolFailed` event with an observation for the model, or a `TaskGroup` that cancels the siblings.
 
 ## Rule for the core
 
