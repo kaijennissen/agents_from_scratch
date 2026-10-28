@@ -1,7 +1,9 @@
-"""Static layout of the TUI: banner, conversation, tools panel, status, prompt.
+"""Textual front end: conversation on the left, tool calls on the right, prompt below.
 
-No agent is wired in yet; submitting a message only echoes it into the
-conversation.
+The app owns the conversation history and runs the core's `run_agent` as a
+worker on Textual's event loop. The core reports progress through `on_event`;
+`forward_event` turns each event into a Textual message, and the handlers
+update the widgets.
 """
 
 from typing import Literal, assert_never
@@ -78,7 +80,7 @@ class ToolRow(Horizontal):
 
 
 class ToolPanel(VerticalScroll):
-    """Right-hand column listing tool calls. Empty until tools are wired in."""
+    """Right-hand column with one ToolRow per tool call; Tab hides it."""
 
     def on_mount(self) -> None:
         self.border_title = "Tools"
@@ -139,6 +141,11 @@ class TurnFinished(Message):
 
 
 class AgentApp(App[None]):
+    """One conversation with the agent; at most one turn runs at a time.
+
+    The model call and the tool runner are passed in, so tests can use fakes.
+    """
+
     CSS = """
     #main { height: 1fr; }
     #conversation { width: 1fr; border: round $primary; padding: 0 1; }
@@ -255,6 +262,7 @@ class AgentApp(App[None]):
         self.run_worker(self.run_turn(), exclusive=True)
 
     async def run_turn(self) -> None:
+        """Worker body: run the agent on the history and show its answer or error."""
         try:
             answer, _ = await run_agent(
                 self.messages,
