@@ -4,6 +4,7 @@ No agent is wired in yet; submitting a message only echoes it into the
 conversation.
 """
 
+from collections.abc import Awaitable, Callable
 from typing import Literal, assert_never
 
 from rich.text import Text
@@ -14,18 +15,26 @@ from textual.message import Message
 from textual.widgets import Footer, Static, TextArea
 
 from agents_from_scratch.agent import (
+    DEFAULT_MAX_TURNS,
+    SYSTEM_PROMPT,
     BashResult,
     Event,
+    LlmError,
     ToolCall,
     ToolCancelled,
     ToolEnd,
     ToolStart,
     TurnStart,
+    run_agent,
+)
+from agents_from_scratch.agent import (
+    Message as ChatMessage,
 )
 from agents_from_scratch.banner import render_banner
 
 DEFAULT_MODEL = "unknown-model"
 
+type LlmCall = Callable[[list[ChatMessage]], Awaitable[str]]
 type Status = Literal["running", "ok", "failed", "cancelled"]
 
 
@@ -125,6 +134,10 @@ class TurnStarted(Message):
         self.max_turns = max_turns
 
 
+class TurnFinished(Message):
+    """Posted after a turn ends, so it is handled after that turn's other messages."""
+
+
 class AgentApp(App[None]):
     CSS = """
     #main { height: 1fr; }
@@ -135,6 +148,7 @@ class AgentApp(App[None]):
     #prompt { height: auto; min-height: 3; max-height: 10; }
     .message { margin: 1 0 0 0; }
     .message.user { background: $boost; padding: 0 1; }
+    .message.error { color: $error; }
     """
 
     BINDINGS = [
@@ -142,9 +156,20 @@ class AgentApp(App[None]):
         Binding("ctrl+c", "quit", "Exit", priority=True),
     ]
 
-    def __init__(self, model: str = DEFAULT_MODEL) -> None:
+    def __init__(
+        self,
+        call: LlmCall,
+        model: str = DEFAULT_MODEL,
+        max_turns: int = DEFAULT_MAX_TURNS,
+    ) -> None:
         super().__init__()
+        self.call = call
         self.model = model
+        self.max_turns = max_turns
+        self.messages: list[ChatMessage] = [
+            {"role": "system", "content": SYSTEM_PROMPT}
+        ]
+        self.busy = False
         self.rows: dict[str, ToolRow] = {}  # call.id -> row
 
     def compose(self) -> ComposeResult:
@@ -199,19 +224,41 @@ class AgentApp(App[None]):
             f"Working… turn {message.turn + 1}/{message.max_turns}"
         )
 
-    async def on_prompt_area_submitted(self, event: PromptArea.Submitted) -> None:
-        text = event.text.strip()
-        self.query_one("#prompt", PromptArea).clear()
-        if not text:
-            return
+    def on_turn_finished(self, message: TurnFinished) -> None:
+        self.busy = False
+        self.query_one("#status", Static).update("")
+
+    async def add_message(self, text: str, role: str) -> None:
         conversation = self.query_one("#conversation", VerticalScroll)
-        await conversation.mount(Static(f"> {text}", classes="message user"))
+        await conversation.mount(Static(text, classes=f"message {role}", markup=False))
         conversation.scroll_end(animate=False)
 
+    async def on_prompt_area_submitted(self, event: PromptArea.Submitted) -> None:
+        text = event.text.strip()
+        prompt = self.query_one("#prompt", PromptArea)
+        if not text:
+            prompt.clear()
+            return
+        if self.busy:
+            self.notify("Agent is busy…", severity="warning")  # keep the typed text
+            return
+        prompt.clear()
+        await self.add_message(f"> {text}", "user")
+        history_length = len(self.messages)  # restore point if the turn fails
+        self.messages.append({"role": "user", "content": text})
+        self.busy = True
+        self.run_worker(self.run_turn(history_length), exclusive=True)
 
-def run() -> None:
-    AgentApp().run()
-
-
-if __name__ == "__main__":
-    run()
+    async def run_turn(self, history_length: int) -> None:
+        try:
+            answer, _ = await run_agent(
+                self.messages, self.max_turns, self.call, on_event=self.forward_event
+            )
+            await self.add_message(answer, "assistant")
+        except LlmError as e:
+            # Only the model being unreachable is expected; anything else is a
+            # bug and should crash loudly.
+            del self.messages[history_length:]
+            await self.add_message(str(e), "error")
+        finally:
+            self.post_message(TurnFinished())
