@@ -21,9 +21,6 @@ from httpx2 import AsyncClient
 
 from agents_from_scratch.banner import GREY, RESET, rgb
 
-TIMEOUT = 3
-
-
 RED = rgb("#FF5555")
 GREEN = rgb("#50FA7B")
 YELLOW = rgb("#FFCC00")
@@ -129,6 +126,7 @@ class SkillCall:
 
 
 type ToolCall = BashCall
+type RunTool = Callable[[str], Awaitable[BashResult]]  # cmd -> result
 
 
 @dataclass(frozen=True)
@@ -165,7 +163,7 @@ def format_observation(result: BashResult) -> str:
     """Turn a BashResult into the text the model reads."""
     if result.timed_out:
         return (
-            f"Command `{result.cmd}` was killed after a timeout of {TIMEOUT} seconds. "
+            f"Command `{result.cmd}` was killed because it hit the time limit. "
             "It did not finish, so its result and side effects are unknown, "
             "and any output it produced was discarded."
         )
@@ -254,7 +252,7 @@ def print_event(event: Event) -> None:
             assert_never(event)
 
 
-async def run_bash_tool(cmd: str):
+async def run_bash_tool(cmd: str, *, timeout: float) -> BashResult:
     proc = await asyncio.create_subprocess_shell(
         cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -264,7 +262,7 @@ async def run_bash_tool(cmd: str):
     proc_id = proc.pid
 
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         return BashResult.completed(
             cmd=cmd,
             stdout=stdout.decode(errors="replace"),
@@ -299,9 +297,9 @@ def emit(on_event: OnEvent, event: Event) -> None:
 
 async def run_tool(
     tool_call: ToolCall,
-    tool_fn: Callable[[str], Awaitable[BashResult]],
+    tool_fn: RunTool,
     on_event: OnEvent = _ignore,
-):
+) -> BashResult:
     emit(on_event, ToolStart(call=tool_call))
     try:
         result = await tool_fn(tool_call.cmd)
@@ -316,6 +314,7 @@ async def run_agent(
     messages: list[Message],
     max_turns: int,
     call: Callable[[list[Message]], Awaitable[str]],
+    tool_fn: RunTool,
     on_event: OnEvent = _ignore,
 ) -> tuple[str, list[Message]]:
     for turn in range(max_turns):
@@ -343,7 +342,7 @@ async def run_agent(
             tool_calls = [BashCall(id=create_uuid(), cmd=cmd) for cmd in action["bash"]]
             results = await asyncio.gather(
                 *(
-                    run_tool(tool_call, tool_fn=run_bash_tool, on_event=on_event)
+                    run_tool(tool_call, tool_fn=tool_fn, on_event=on_event)
                     for tool_call in tool_calls
                 )
             )

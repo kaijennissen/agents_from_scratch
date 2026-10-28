@@ -6,9 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from agents_from_scratch import agent
 from agents_from_scratch.agent import (
-    TIMEOUT,
     BashResult,
     format_observation,
     run_bash_tool,
@@ -25,29 +23,25 @@ from agents_from_scratch.agent import (
 async def test_run_bash_tool_keeps_streams_apart(
     cmd: str, stdout: str, stderr: str, returncode: int
 ) -> None:
-    result = await run_bash_tool(cmd)
+    result = await run_bash_tool(cmd, timeout=5)
 
     assert result == BashResult.completed(cmd, stdout, stderr, returncode)
 
 
-async def test_run_bash_tool_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(agent, "TIMEOUT", 0.1)
+async def test_run_bash_tool_times_out() -> None:
     start = time.monotonic()
 
-    result = await run_bash_tool("sleep 5")
+    result = await run_bash_tool("sleep 5", timeout=0.1)
 
     assert result == BashResult.timeout("sleep 5")
     assert time.monotonic() - start < 1
 
 
-async def test_run_bash_tool_timeout_kills_child_processes(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+async def test_run_bash_tool_timeout_kills_child_processes(tmp_path: Path) -> None:
     """Killing only the shell would leave its children running unseen."""
-    monkeypatch.setattr(agent, "TIMEOUT", 0.1)
     marker = tmp_path / "marker"
 
-    await run_bash_tool(f"(sleep 0.3; touch {marker}) & wait")
+    await run_bash_tool(f"(sleep 0.3; touch {marker}) & wait", timeout=0.1)
     await asyncio.sleep(0.5)
 
     assert not marker.exists()
@@ -70,7 +64,7 @@ async def test_run_bash_tool_timeout_kills_child_processes(
         ),
         (
             BashResult.timeout("sleep 999", stdout="partial", stderr="oops"),
-            ["sleep 999", f"{TIMEOUT} seconds"],
+            ["sleep 999", "time limit"],
             ["exit code", "partial", "oops"],
         ),
     ],

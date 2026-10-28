@@ -20,6 +20,7 @@ from agents_from_scratch.agent import (
     BashResult,
     Event,
     LlmError,
+    RunTool,
     ToolCall,
     ToolCancelled,
     ToolEnd,
@@ -159,6 +160,7 @@ class AgentApp(App[None]):
     def __init__(
         self,
         call: LlmCall,
+        tool_fn: RunTool,
         model: str = DEFAULT_MODEL,
         max_turns: int = DEFAULT_MAX_TURNS,
         first_prompt: str | None = None,
@@ -166,6 +168,7 @@ class AgentApp(App[None]):
         super().__init__()
         self.first_prompt = first_prompt
         self.call = call
+        self.tool_fn = tool_fn
         self.model = model
         self.max_turns = max_turns
         self.messages: list[ChatMessage] = [
@@ -256,7 +259,11 @@ class AgentApp(App[None]):
     async def run_turn(self, history_length: int) -> None:
         try:
             answer, _ = await run_agent(
-                self.messages, self.max_turns, self.call, on_event=self.forward_event
+                self.messages,
+                self.max_turns,
+                self.call,
+                self.tool_fn,
+                on_event=self.forward_event,
             )
             await self.add_message(answer, "assistant")
         except LlmError as e:

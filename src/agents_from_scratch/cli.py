@@ -24,9 +24,11 @@ from agents_from_scratch.agent import (
     SYSTEM_PROMPT,
     LlmError,
     Message,
+    RunTool,
     llm_call,
     print_event,
     run_agent,
+    run_bash_tool,
 )
 from agents_from_scratch.banner import print_banner, prompt_text
 
@@ -59,6 +61,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "-t", "--max-turns", default=DEFAULT_MAX_TURNS, type=int, help="max turns"
     )
+    parser.add_argument(
+        "--timeout",
+        default=60,
+        type=float,
+        help="seconds a bash command may run before it is killed (default: %(default)s)",
+    )
     args = parser.parse_args(argv)
     if args.headless_prompt and args.plain:
         parser.error("-p and --plain cannot be combined")
@@ -73,7 +81,7 @@ def select_mode(args: argparse.Namespace) -> Mode:
     return "plain" if args.plain else "tui"
 
 
-async def run_headless(prompt: str, max_turns: int) -> None:
+async def run_headless(prompt: str, max_turns: int, tool_fn: RunTool) -> None:
     async with ollama_client() as client:
         messages: list[Message] = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -84,6 +92,7 @@ async def run_headless(prompt: str, max_turns: int) -> None:
                 messages,
                 max_turns=max_turns,
                 call=partial(llm_call, client),
+                tool_fn=tool_fn,
                 on_event=print_event,
             )
         except LlmError as e:
@@ -91,7 +100,7 @@ async def run_headless(prompt: str, max_turns: int) -> None:
         print("\n" + answer + "\n")
 
 
-async def run_plain(max_turns: int) -> None:
+async def run_plain(max_turns: int, tool_fn: RunTool) -> None:
     async with ollama_client() as client:
         call = partial(llm_call, client)
         messages: list[Message] = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -103,7 +112,11 @@ async def run_plain(max_turns: int) -> None:
             messages.append({"role": "user", "content": prompt})
             try:
                 answer, messages = await run_agent(
-                    messages, max_turns=max_turns, call=call, on_event=print_event
+                    messages,
+                    max_turns=max_turns,
+                    call=call,
+                    tool_fn=tool_fn,
+                    on_event=print_event,
                 )
             except LlmError as e:
                 # Keep the session: history is still valid, so the user can retry.
@@ -112,12 +125,13 @@ async def run_plain(max_turns: int) -> None:
             print("\n" + answer + "\n")
 
 
-async def run_tui(max_turns: int, first_prompt: str | None) -> None:
+async def run_tui(max_turns: int, tool_fn: RunTool, first_prompt: str | None) -> None:
     from agents_from_scratch.tui.app import AgentApp  # keeps Textual off the -p path
 
     async with ollama_client() as client:
         app = AgentApp(
             partial(llm_call, client),
+            tool_fn,
             model=MODEL,
             max_turns=max_turns,
             first_prompt=first_prompt,
@@ -127,18 +141,19 @@ async def run_tui(max_turns: int, first_prompt: str | None) -> None:
 
 def cli(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
+    tool_fn = partial(run_bash_tool, timeout=args.timeout)
     match select_mode(args):
         case "headless":
-            asyncio.run(run_headless(args.headless_prompt, args.max_turns))
+            asyncio.run(run_headless(args.headless_prompt, args.max_turns, tool_fn))
         case "plain":
-            asyncio.run(run_plain(args.max_turns))
+            asyncio.run(run_plain(args.max_turns, tool_fn))
         case "tui":
             if not (sys.stdin.isatty() and sys.stdout.isatty()):
                 sys.exit(
                     "The TUI needs an interactive terminal. "
                     "Use -p PROMPT for a one-shot run, or --plain for the REPL."
                 )
-            asyncio.run(run_tui(args.max_turns, args.prompt))
+            asyncio.run(run_tui(args.max_turns, tool_fn, args.prompt))
 
 
 if __name__ == "__main__":

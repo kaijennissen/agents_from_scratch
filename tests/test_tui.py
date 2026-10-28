@@ -46,10 +46,15 @@ def replies(*texts: str) -> Callable[[list[Message]], Awaitable[str]]:
     return call
 
 
+async def ok_tool(cmd: str) -> BashResult:
+    """A fake tool runner: every command succeeds at once, no subprocess."""
+    return BashResult.completed(cmd, "", "", 0)
+
+
 def make_app(
     call: Callable[[list[Message]], Awaitable[str]] | None = None, **kwargs: Any
 ) -> AgentApp:
-    return AgentApp(call or replies(), **kwargs)
+    return AgentApp(call or replies(), ok_tool, **kwargs)
 
 
 async def test_layout_has_banner_tools_status_and_input() -> None:
