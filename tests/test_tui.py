@@ -26,6 +26,7 @@ from agents_from_scratch.tui.app import (
     ToolRow,
     status_for,
 )
+from fakes import ok_tool, replies
 
 EXIT_HI = "<action><exit>hi</exit></action>"
 
@@ -34,21 +35,6 @@ async def settle(app: AgentApp, pilot: Any) -> None:
     """Wait for the running turn, then let the messages it posted be handled."""
     await app.workers.wait_for_complete()  # pyright: ignore[reportUnknownMemberType]
     await pilot.pause()
-
-
-def replies(*texts: str) -> LlmCall:
-    """A fake model that answers with the given texts, in order."""
-    it = iter(texts)
-
-    async def call(_messages: list[Message]) -> str:
-        return next(it)
-
-    return call
-
-
-async def ok_tool(cmd: str) -> BashResult:
-    """A fake tool runner: every command succeeds at once, no subprocess."""
-    return BashResult.completed(cmd, "", "", 0)
 
 
 def make_app(call: LlmCall | None = None, **kwargs: Any) -> AgentApp:
