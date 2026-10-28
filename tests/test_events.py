@@ -1,6 +1,8 @@
-"""A broken front end must not kill the agent, but cancellation must get through."""
+"""Reporting progress: emit guards the front end's callback, run_tool brackets a command."""
 
 import asyncio
+from contextlib import AbstractContextManager, nullcontext
+from typing import Any
 
 import pytest
 
@@ -15,64 +17,71 @@ from agents_from_scratch.agent import (
     emit,
     run_tool,
 )
-
-EVENT = TurnStart(turn=0, max_turns=1)
-
-
-def test_emit_passes_event_to_callback() -> None:
-    events: list[Event] = []
-
-    emit(events.append, EVENT)
-
-    assert events == [EVENT]
+from fakes import ok
 
 
-def test_emit_swallows_and_logs_callback_errors(
+@pytest.mark.parametrize(
+    "error,expectation,logged",
+    [
+        pytest.param(
+            ValueError("widget gone"), nullcontext(), True, id="bug-is-logged"
+        ),
+        pytest.param(
+            asyncio.CancelledError(),
+            pytest.raises(asyncio.CancelledError),
+            False,
+            id="cancel-gets-through",
+        ),
+    ],
+)
+def test_emit_survives_a_broken_callback_but_not_a_cancel(
     caplog: pytest.LogCaptureFixture,
+    error: BaseException,
+    expectation: AbstractContextManager[Any],
+    logged: bool,
 ) -> None:
-    def broken(_: Event) -> None:
-        raise ValueError("widget gone")
+    """A broken front end must not kill the agent, but Esc must still stop it."""
 
-    emit(broken, EVENT)
+    def callback(_: Event) -> None:
+        raise error
 
-    assert "widget gone" in caplog.text
+    with expectation:
+        emit(callback, TurnStart(turn=0, max_turns=1))
 
-
-def test_emit_lets_cancellation_through() -> None:
-    def cancelled(_: Event) -> None:
-        raise asyncio.CancelledError
-
-    with pytest.raises(asyncio.CancelledError):
-        emit(cancelled, EVENT)
+    assert bool(caplog.records) is logged
 
 
-async def test_run_tool_reports_start_and_end() -> None:
-    call = BashCall(id="1", cmd="ls")
-    result = BashResult.completed("ls", stdout="a.py", stderr="", returncode=0)
-    events: list[Event] = []
+class TestRunTool:
+    @pytest.fixture
+    def call(self) -> BashCall:
+        return BashCall(id="1", cmd="ls")
 
-    async def tool(_: str) -> BashResult:
-        return result
+    async def test_reports_start_and_end_with_the_result(
+        self, call: BashCall, events: list[Event]
+    ) -> None:
+        async def tool(cmd: str) -> BashResult:
+            return ok(cmd)
 
-    assert await run_tool(call, tool, events.append) == result
-    assert events == [ToolStart(call), ToolEnd(call, result)]
+        result = await run_tool(call, tool, events.append)
 
+        assert result == ok("ls")
+        assert events == [ToolStart(call), ToolEnd(call, result)]
 
-async def test_run_tool_reports_cancellation() -> None:
-    """A cancelled command still ends its row, so no bullet stays 'running'."""
-    call = BashCall(id="1", cmd="sleep 999")
-    started = asyncio.Event()
-    events: list[Event] = []
+    async def test_reports_cancellation(
+        self, call: BashCall, events: list[Event]
+    ) -> None:
+        """A cancelled command still ends its row, so no bullet stays 'running'."""
+        started = asyncio.Event()
 
-    async def hang(_: str) -> BashResult:
-        started.set()
-        await asyncio.Event().wait()  # never set
-        raise AssertionError("unreachable")
+        async def hang(_: str) -> BashResult:
+            started.set()
+            await asyncio.Event().wait()  # never set
+            raise AssertionError("unreachable")
 
-    task = asyncio.create_task(run_tool(call, hang, events.append))
-    await started.wait()
-    task.cancel()
+        task = asyncio.create_task(run_tool(call, hang, events.append))
+        await started.wait()
+        task.cancel()
 
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert events == [ToolStart(call), ToolCancelled(call)]
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert events == [ToolStart(call), ToolCancelled(call)]
