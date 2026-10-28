@@ -16,8 +16,10 @@ from agents_from_scratch.agent import (
 @pytest.mark.parametrize(
     "cmd,stdout,stderr,returncode",
     [
-        ("echo out; echo err >&2; exit 3", "out\n", "err\n", 3),
-        (r"printf '\377'", "\ufffd", "", 0),  # not valid UTF-8
+        pytest.param(
+            "echo out; echo err >&2; exit 3", "out\n", "err\n", 3, id="streams-apart"
+        ),
+        pytest.param(r"printf '\377'", "\ufffd", "", 0, id="invalid-utf8-replaced"),
     ],
 )
 async def test_run_bash_tool_keeps_streams_apart(
@@ -50,22 +52,25 @@ async def test_run_bash_tool_timeout_kills_child_processes(tmp_path: Path) -> No
 @pytest.mark.parametrize(
     "result,present,absent",
     [
-        (
+        pytest.param(
             BashResult.completed("pwd", stdout="/repo", stderr="", returncode=0),
             ["pwd", "exit code 0", "stdout", "/repo", "stderr"],
             [],
+            id="success",
         ),
-        (
+        pytest.param(
             BashResult.completed(
                 "ls nope", stdout="", stderr="no such file", returncode=2
             ),
             ["ls nope", "exit code 2", "stdout", "stderr", "no such file"],
             [],
+            id="failure",
         ),
-        (
+        pytest.param(
             BashResult.timeout("sleep 999", stdout="partial", stderr="oops"),
             ["sleep 999", "time limit"],
             ["exit code", "partial", "oops"],
+            id="timeout-hides-output",
         ),
     ],
 )
