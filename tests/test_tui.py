@@ -1,10 +1,18 @@
 """Static TUI layout: widgets exist, tools panel collapses, prompt submits."""
 
+import pytest
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
-from agents_from_scratch.agent import BashCall, BashResult
+from agents_from_scratch.agent import (
+    BashCall,
+    BashResult,
+    ToolCancelled,
+    ToolEnd,
+    ToolStart,
+    TurnStart,
+)
 from agents_from_scratch.tui.app import (
     AgentApp,
     PromptArea,
@@ -129,3 +137,100 @@ async def test_tool_row_does_not_parse_markup_in_command() -> None:
     async with app.run_test():
         cmd = app.query_one(".cmd", Static)
         assert str(cmd.render()) == "echo [bold]hi[/bold]"
+
+
+# --- forward_event ------------------------------------------------------
+
+
+def call(id: str, cmd: str = "ls") -> BashCall:
+    return BashCall(id=id, cmd=cmd)
+
+
+def done(cmd: str, returncode: int) -> BashResult:
+    return BashResult.completed(cmd, "", "", returncode)
+
+
+def row_for(app: AgentApp, id: str) -> ToolRow:
+    (row,) = [r for r in app.query(ToolRow) if r.call.id == id]
+    return row
+
+
+async def test_tool_start_mounts_a_running_row_in_the_tools_panel() -> None:
+    app = AgentApp()
+    async with app.run_test() as pilot:
+        app.forward_event(ToolStart(call("a", "ls -la")))
+        await pilot.pause()
+        (row,) = app.query_one("#tools", ToolPanel).query(ToolRow)
+        assert row.status == "running"
+        assert str(row.query_one(".cmd", Static).render()) == "ls -la"
+
+
+async def test_tool_end_zero_exit_marks_row_ok() -> None:
+    app = AgentApp()
+    async with app.run_test() as pilot:
+        c = call("a")
+        app.forward_event(ToolStart(c))
+        app.forward_event(ToolEnd(c, done("ls", 0)))
+        await pilot.pause()
+        assert row_for(app, "a").status == "ok"
+
+
+async def test_tool_end_nonzero_exit_marks_row_failed() -> None:
+    app = AgentApp()
+    async with app.run_test() as pilot:
+        c = call("a")
+        app.forward_event(ToolStart(c))
+        app.forward_event(ToolEnd(c, done("ls", 1)))
+        await pilot.pause()
+        assert row_for(app, "a").status == "failed"
+
+
+async def test_tool_end_timeout_marks_row_failed() -> None:
+    app = AgentApp()
+    async with app.run_test() as pilot:
+        c = call("a", "sleep 9")
+        app.forward_event(ToolStart(c))
+        app.forward_event(ToolEnd(c, BashResult.timeout("sleep 9")))
+        await pilot.pause()
+        assert row_for(app, "a").status == "failed"
+
+
+async def test_tool_cancelled_marks_row_cancelled() -> None:
+    app = AgentApp()
+    async with app.run_test() as pilot:
+        c = call("a")
+        app.forward_event(ToolStart(c))
+        app.forward_event(ToolCancelled(c))
+        await pilot.pause()
+        assert row_for(app, "a").status == "cancelled"
+
+
+async def test_parallel_tools_are_matched_by_id() -> None:
+    app = AgentApp()
+    async with app.run_test() as pilot:
+        a, b = call("a", "ls"), call("b", "false")
+        app.forward_event(ToolStart(a))
+        app.forward_event(ToolStart(b))
+        app.forward_event(ToolEnd(b, done("false", 1)))  # B finishes first
+        await pilot.pause()
+        assert row_for(app, "a").status == "running"
+        assert row_for(app, "b").status == "failed"
+        app.forward_event(ToolEnd(a, done("ls", 0)))
+        await pilot.pause()
+        assert row_for(app, "a").status == "ok"
+
+
+async def test_turn_start_updates_the_status_line() -> None:
+    app = AgentApp()
+    async with app.run_test() as pilot:
+        app.forward_event(TurnStart(0, 5))
+        await pilot.pause()
+        assert str(app.query_one("#status", Static).render()) == "Working… turn 1/5"
+
+
+async def test_tool_end_without_start_fails_loudly() -> None:
+    app = AgentApp()
+    with pytest.raises(KeyError):
+        async with app.run_test() as pilot:
+            app.forward_event(ToolEnd(call("ghost"), done("ls", 0)))
+            await pilot.pause()

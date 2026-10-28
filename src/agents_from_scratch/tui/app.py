@@ -4,7 +4,7 @@ No agent is wired in yet; submitting a message only echoes it into the
 conversation.
 """
 
-from typing import Literal
+from typing import Literal, assert_never
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -13,7 +13,15 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.message import Message
 from textual.widgets import Footer, Static, TextArea
 
-from agents_from_scratch.agent import BashResult, ToolCall
+from agents_from_scratch.agent import (
+    BashResult,
+    Event,
+    ToolCall,
+    ToolCancelled,
+    ToolEnd,
+    ToolStart,
+    TurnStart,
+)
 from agents_from_scratch.banner import render_banner
 
 DEFAULT_MODEL = "unknown-model"
@@ -91,6 +99,32 @@ class PromptArea(TextArea):
         self.insert("\n")
 
 
+class ToolStarted(Message):
+    def __init__(self, call: ToolCall) -> None:
+        super().__init__()
+        self.call = call
+
+
+class ToolFinished(Message):
+    def __init__(self, call: ToolCall, result: BashResult) -> None:
+        super().__init__()
+        self.call = call
+        self.result = result
+
+
+class ToolAborted(Message):
+    def __init__(self, call: ToolCall) -> None:
+        super().__init__()
+        self.call = call
+
+
+class TurnStarted(Message):
+    def __init__(self, turn: int, max_turns: int) -> None:
+        super().__init__()
+        self.turn = turn
+        self.max_turns = max_turns
+
+
 class AgentApp(App[None]):
     CSS = """
     #main { height: 1fr; }
@@ -111,6 +145,7 @@ class AgentApp(App[None]):
     def __init__(self, model: str = DEFAULT_MODEL) -> None:
         super().__init__()
         self.model = model
+        self.rows: dict[str, ToolRow] = {}  # call.id -> row
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="main"):
@@ -132,6 +167,37 @@ class AgentApp(App[None]):
 
     def action_toggle_tools(self) -> None:
         self.query_one("#tools").toggle_class("collapsed")
+
+    def forward_event(self, event: Event) -> None:
+        """The core's OnEvent callback: translate to a message and return at once."""
+        match event:
+            case ToolStart(call):
+                self.post_message(ToolStarted(call))
+            case ToolEnd(call, result):
+                self.post_message(ToolFinished(call, result))
+            case ToolCancelled(call):
+                self.post_message(ToolAborted(call))
+            case TurnStart(turn, max_turns):
+                self.post_message(TurnStarted(turn, max_turns))
+            case _:
+                assert_never(event)
+
+    async def on_tool_started(self, message: ToolStarted) -> None:
+        row = ToolRow(message.call)
+        self.rows[message.call.id] = row
+        await self.query_one("#tools", ToolPanel).mount(row)
+
+    def on_tool_finished(self, message: ToolFinished) -> None:
+        # A missing id means an end without a start: a bug, so let it raise.
+        self.rows[message.call.id].set_status(status_for(message.result))
+
+    def on_tool_aborted(self, message: ToolAborted) -> None:
+        self.rows[message.call.id].set_status("cancelled")
+
+    def on_turn_started(self, message: TurnStarted) -> None:
+        self.query_one("#status", Static).update(
+            f"Working… turn {message.turn + 1}/{message.max_turns}"
+        )
 
     async def on_prompt_area_submitted(self, event: PromptArea.Submitted) -> None:
         text = event.text.strip()
