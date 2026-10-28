@@ -1,7 +1,6 @@
 """Static TUI layout: widgets exist, tools panel collapses, prompt submits."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -12,6 +11,7 @@ from textual.widgets import Static
 from agents_from_scratch.agent import (
     BashCall,
     BashResult,
+    LlmCall,
     LlmError,
     Message,
     ToolCancelled,
@@ -36,7 +36,7 @@ async def settle(app: AgentApp, pilot: Any) -> None:
     await pilot.pause()
 
 
-def replies(*texts: str) -> Callable[[list[Message]], Awaitable[str]]:
+def replies(*texts: str) -> LlmCall:
     """A fake model that answers with the given texts, in order."""
     it = iter(texts)
 
@@ -51,9 +51,7 @@ async def ok_tool(cmd: str) -> BashResult:
     return BashResult.completed(cmd, "", "", 0)
 
 
-def make_app(
-    call: Callable[[list[Message]], Awaitable[str]] | None = None, **kwargs: Any
-) -> AgentApp:
+def make_app(call: LlmCall | None = None, **kwargs: Any) -> AgentApp:
     return AgentApp(call or replies(), ok_tool, **kwargs)
 
 
@@ -305,7 +303,7 @@ async def test_tool_turn_shows_a_finished_row_then_the_answer() -> None:
         assert texts(app, ".message.assistant") == ["hi"]
 
 
-async def test_llm_error_is_shown_and_history_rolled_back() -> None:
+async def test_llm_error_is_shown_and_session_kept() -> None:
     async def broken(_messages: list[Message]) -> str:
         raise LlmError("boom")
 
@@ -314,7 +312,7 @@ async def test_llm_error_is_shown_and_history_rolled_back() -> None:
         await submit(app, pilot, "yo")
         assert texts(app, ".message.error") == ["boom"]
         assert texts(app, ".message.user") == ["> yo"]  # the user's text stays visible
-        assert [m["role"] for m in app.messages] == ["system"]
+        assert [m["role"] for m in app.messages] == ["system", "user"]
         assert not app.busy
         assert str(app.query_one("#status", Static).render()) == ""
 

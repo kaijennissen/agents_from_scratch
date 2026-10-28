@@ -4,7 +4,6 @@ No agent is wired in yet; submitting a message only echoes it into the
 conversation.
 """
 
-from collections.abc import Awaitable, Callable
 from typing import Literal, assert_never
 
 from rich.text import Text
@@ -19,6 +18,7 @@ from agents_from_scratch.agent import (
     SYSTEM_PROMPT,
     BashResult,
     Event,
+    LlmCall,
     LlmError,
     RunTool,
     ToolCall,
@@ -35,7 +35,6 @@ from agents_from_scratch.banner import render_banner
 
 DEFAULT_MODEL = "unknown-model"
 
-type LlmCall = Callable[[list[ChatMessage]], Awaitable[str]]
 type Status = Literal["running", "ok", "failed", "cancelled"]
 
 
@@ -251,12 +250,11 @@ class AgentApp(App[None]):
             return
         prompt.clear()
         await self.add_message(f"> {text}", "user")
-        history_length = len(self.messages)  # restore point if the turn fails
         self.messages.append({"role": "user", "content": text})
         self.busy = True
-        self.run_worker(self.run_turn(history_length), exclusive=True)
+        self.run_worker(self.run_turn(), exclusive=True)
 
-    async def run_turn(self, history_length: int) -> None:
+    async def run_turn(self) -> None:
         try:
             answer, _ = await run_agent(
                 self.messages,
@@ -267,9 +265,9 @@ class AgentApp(App[None]):
             )
             await self.add_message(answer, "assistant")
         except LlmError as e:
-            # Only the model being unreachable is expected; anything else is a
-            # bug and should crash loudly.
-            del self.messages[history_length:]
+            # Keep the session: the failed call appended nothing, so the history
+            # is still valid and the user can retry. Only LlmError is expected;
+            # anything else is a bug and should crash loudly.
             await self.add_message(str(e), "error")
         finally:
             self.post_message(TurnFinished())

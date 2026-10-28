@@ -147,6 +147,7 @@ class ToolCancelled:
 
 type Event = ToolStart | ToolEnd | ToolCancelled | TurnStart
 type OnEvent = Callable[[Event], None]  # plain def, must return immediately
+type LlmCall = Callable[[list[Message]], Awaitable[str]]  # history -> reply
 
 
 @dataclass(frozen=True)
@@ -313,7 +314,7 @@ async def run_tool(
 async def run_agent(
     messages: list[Message],
     max_turns: int,
-    call: Callable[[list[Message]], Awaitable[str]],
+    call: LlmCall,
     tool_fn: RunTool,
     on_event: OnEvent = _ignore,
 ) -> tuple[str, list[Message]]:
