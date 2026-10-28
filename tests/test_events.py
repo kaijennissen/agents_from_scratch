@@ -7,7 +7,8 @@ from typing import Any
 
 import pytest
 
-from agents_from_scratch.agent import (
+from fakes import ok
+from koding_agent.agent import (
     GREEN,
     GREY,
     RED,
@@ -24,7 +25,6 @@ from agents_from_scratch.agent import (
     print_event,
     run_tool,
 )
-from fakes import ok
 
 LS = BashCall(id="1", cmd="ls")
 

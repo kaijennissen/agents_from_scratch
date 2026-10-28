@@ -7,7 +7,7 @@ import httpx2
 import pytest
 from httpx2 import AsyncClient
 
-from agents_from_scratch.agent import (
+from koding_agent.agent import (
     MIXED_ACTIONS_ERROR,
     MODEL,
     LlmError,

@@ -1,7 +1,7 @@
 <h1>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/headline-dark.svg">
-    <img src="docs/images/headline-light.svg" alt="koding aigent" height="48">
+    <img src="docs/images/headline-light.svg" alt="koding agent" height="48">
   </picture>
 </h1>
 
@@ -9,7 +9,7 @@ A coding agent built from scratch: a small act → observe → decide loop that 
 local LLM (served by Ollama) for a shell command, runs it, and feeds the output back
 until the model declares the task done.
 
-![koding aigent start-up banner](docs/images/startup-banner.png)
+![koding agent start-up banner](docs/images/startup-banner.png)
 
 > [!CAUTION]
 > **Never run this agent directly on your host system.**
@@ -21,7 +21,7 @@ until the model declares the task done.
 
 ## Status
 
-This is a learning project that has grown into a *koding aigent that could, in
+This is a learning project that has grown into a *koding agent that could, in
 theory, do real work*. It is small enough to read in one sitting (~250 lines of
 Python), but it is already used to develop itself: features such as parallel
 (batched) tool calls were implemented by the agent working on its own repository.
@@ -76,10 +76,10 @@ uv run pytest           # test
 ## Modes
 
 ```sh
-agents-from-scratch                    # TUI
-agents-from-scratch "fix the bug"      # TUI, with this as the first message
-agents-from-scratch -p "fix the bug"   # headless: run once, print the answer
-agents-from-scratch --plain            # line-based REPL
+koding-agent                    # TUI
+koding-agent "fix the bug"      # TUI, with this as the first message
+koding-agent -p "fix the bug"   # headless: run once, print the answer
+koding-agent --plain            # line-based REPL
 ```
 
 `-t/--max-turns N` applies to all modes. Combining `-p`, `--plain` and a positional
@@ -131,7 +131,7 @@ docker run --rm \
     --volume "$WORKSPACE":/workspace \
     --name agent-sandbox \
     agent_sandbox \
-    /opt/app/bin/agents-from-scratch --max-turns 25 --prompt "..."
+    /opt/app/bin/koding-agent --max-turns 25 --prompt "..."
 
 # 4. Review the agent's changes on the host.
 git -C "$WORKSPACE" status
