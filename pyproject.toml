@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agents-from-scratch = "agents_from_scratch.agent:cli"
+agents-from-scratch = "agents_from_scratch.cli:cli"
 
 [dependency-groups]
 dev = [

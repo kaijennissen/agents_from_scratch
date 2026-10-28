@@ -347,3 +347,11 @@ async def test_next_turn_sees_the_earlier_history() -> None:
         await submit(app, pilot, "a")
         await submit(app, pilot, "b")
         assert seen == [2, 4]  # system+user, then system+user+assistant+user
+
+
+async def test_first_prompt_is_submitted_on_start() -> None:
+    app = make_app(replies(EXIT_HI), first_prompt="hello")
+    async with app.run_test() as pilot:
+        await settle(app, pilot)
+        assert texts(app, ".message.user") == ["> hello"]
+        assert texts(app, ".message.assistant") == ["hi"]

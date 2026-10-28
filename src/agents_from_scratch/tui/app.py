@@ -161,8 +161,10 @@ class AgentApp(App[None]):
         call: LlmCall,
         model: str = DEFAULT_MODEL,
         max_turns: int = DEFAULT_MAX_TURNS,
+        first_prompt: str | None = None,
     ) -> None:
         super().__init__()
+        self.first_prompt = first_prompt
         self.call = call
         self.model = model
         self.max_turns = max_turns
@@ -189,6 +191,8 @@ class AgentApp(App[None]):
 
     def on_mount(self) -> None:
         self.query_one("#prompt", PromptArea).focus()
+        if self.first_prompt:  # goes through the normal submit path
+            self.post_message(PromptArea.Submitted(self.first_prompt))
 
     def action_toggle_tools(self) -> None:
         self.query_one("#tools").toggle_class("collapsed")

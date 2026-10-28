@@ -6,29 +6,20 @@ actions; mixing the two is not allowed. The loop ends when the model
 emits <exit> or the turn budget runs out.
 """
 
-import argparse
 import asyncio
 import logging
 import os
 import re
 import signal
-import sys
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from functools import partial
 from typing import Self, TypedDict, assert_never, cast
 
 import httpx2
 from httpx2 import AsyncClient
 
-from agents_from_scratch.banner import (
-    GREY,
-    RESET,
-    print_banner,
-    prompt_text,
-    rgb,
-)
+from agents_from_scratch.banner import GREY, RESET, rgb
 
 TIMEOUT = 3
 
@@ -366,64 +357,3 @@ async def run_agent(
             )
 
     return f"Ran out of turns ({max_turns}) without an <exit> action.", messages
-
-
-async def main(prompt: str | None, max_turns: int) -> None:
-    async with httpx2.AsyncClient(
-        base_url="http://host.docker.internal:11434", timeout=120
-    ) as client:
-        call = partial(llm_call, client)
-        stop: bool = False
-        messages: list[Message] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-        ]
-
-        if prompt:
-            messages.append({"role": "user", "content": prompt})
-            try:
-                answer, _ = await run_agent(
-                    messages, max_turns=max_turns, call=call, on_event=print_event
-                )
-            except LlmError as e:
-                sys.exit(f"{RED}{e}{RESET}")  # one-shot: report and fail
-            print("\n" + answer + "\n")
-        else:
-            print_banner(MODEL)  # interactive only; keeps -p output pipe-clean
-            while not stop:
-                prompt = input(prompt_text())
-                if prompt == "exit":
-                    stop = True
-                else:
-                    messages.append({"role": "user", "content": prompt})
-                    try:
-                        answer, messages = await run_agent(
-                            messages,
-                            max_turns=max_turns,
-                            call=call,
-                            on_event=print_event,
-                        )
-                    except LlmError as e:
-                        # Keep the session: history is still valid, so the
-                        # user can say "try again" or wait for the model.
-                        print(f"{RED}{e}{RESET}")
-                        continue
-                    print("\n" + answer + "\n")
-
-
-def cli() -> None:
-    parser = argparse.ArgumentParser("Coding agent from scratch")
-    parser.add_argument("-p", "--prompt", required=False, type=str, help="the prompt")
-    parser.add_argument(
-        "-t",
-        "--max-turns",
-        default=DEFAULT_MAX_TURNS,
-        type=int,
-        help="max turns",
-    )
-    args = parser.parse_args()
-
-    asyncio.run(main(prompt=args.prompt, max_turns=args.max_turns))
-
-
-if __name__ == "__main__":
-    cli()
