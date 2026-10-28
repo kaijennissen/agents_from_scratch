@@ -56,7 +56,7 @@ class ToolRow(Horizontal):
     ToolRow { height: 1; }
     ToolRow .bullet { width: 2; }
     ToolRow .cmd { width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }
-    ToolRow.running .bullet { color: $warning; }
+    ToolRow.running .bullet { color: yellow; }
     ToolRow.ok .bullet { color: $success; }
     ToolRow.failed .bullet { color: $error; }
     ToolRow.cancelled .bullet { color: $text-muted; }

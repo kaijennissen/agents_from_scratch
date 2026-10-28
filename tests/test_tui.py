@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 from textual.app import App, ComposeResult
+from textual.color import Color
 from textual.containers import VerticalScroll
 from textual.pilot import Pilot
 from textual.widgets import Static
@@ -202,6 +203,17 @@ class TestToolRow:
         """The colour lives in CSS, so exactly one status class may be set."""
         row.set_status(status)
         assert self.status_classes(row) == {status}
+
+    async def test_each_status_has_its_own_bullet_colour(self, row: ToolRow) -> None:
+        """A missing CSS rule would leave the class set but the colour unchanged."""
+        bullet = row.query_one(".bullet")
+        colours = {"running": bullet.styles.color}
+        statuses: list[Status] = ["ok", "failed", "cancelled"]
+        for status in statuses:
+            row.set_status(status)
+            colours[status] = bullet.styles.color
+        assert colours["running"] == Color.parse("yellow")
+        assert len(set(colours.values())) == 4
 
     @pytest.mark.parametrize(
         "cmd,shown",
