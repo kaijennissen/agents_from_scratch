@@ -1,16 +1,23 @@
-"""Static TUI layout: widgets exist, tools panel collapses, prompt submits."""
+"""The Textual front end, driven by a fake model and fake tools through Textual's Pilot.
+
+Fixture chain: `script` -> `llm` -> `app` -> `pilot`. A test changes what the
+model says with `@pytest.mark.parametrize("script", [...])`; a class that needs
+a special model overrides `llm`.
+"""
 
 import asyncio
-from typing import Any
+from collections.abc import AsyncIterator
 
 import pytest
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
+from textual.pilot import Pilot
 from textual.widgets import Static
 
 from agents_from_scratch.agent import (
     BashCall,
     BashResult,
+    Event,
     LlmCall,
     LlmError,
     Message,
@@ -22,153 +29,65 @@ from agents_from_scratch.agent import (
 from agents_from_scratch.tui.app import (
     AgentApp,
     PromptArea,
-    ToolPanel,
+    Status,
     ToolRow,
     status_for,
 )
-from fakes import ok_tool, replies
+from fakes import ok, ok_tool, replies
 
+MODEL = "some-model"
 EXIT_HI = "<action><exit>hi</exit></action>"
+BASH_TRUE = "<action><bash>true</bash></action>"
+
+LS = BashCall(id="a", cmd="ls")
+FAILED = BashResult.completed("ls", "", "boom", 1)
 
 
-async def settle(app: AgentApp, pilot: Any) -> None:
+# --- fixtures and helpers ------------------------------------------------
+
+
+@pytest.fixture
+def script() -> list[str | Exception]:
+    return [EXIT_HI]
+
+
+@pytest.fixture
+def llm(script: list[str | Exception]) -> LlmCall:
+    return replies(*script)
+
+
+@pytest.fixture
+def app(llm: LlmCall) -> AgentApp:
+    return AgentApp(llm, ok_tool, model=MODEL)
+
+
+@pytest.fixture
+async def pilot(app: AgentApp) -> AsyncIterator[Pilot[None]]:
+    async with app.run_test() as pilot:
+        yield pilot
+
+
+async def settle(app: AgentApp, pilot: Pilot[None]) -> None:
     """Wait for the running turn, then let the messages it posted be handled."""
     await app.workers.wait_for_complete()  # pyright: ignore[reportUnknownMemberType]
     await pilot.pause()
 
 
-def make_app(call: LlmCall | None = None, **kwargs: Any) -> AgentApp:
-    return AgentApp(call or replies(), ok_tool, **kwargs)
+async def submit(app: AgentApp, pilot: Pilot[None], text: str) -> None:
+    await pilot.press(*text, "enter")
+    await settle(app, pilot)
 
 
-async def test_layout_has_banner_tools_status_and_input() -> None:
-    app = make_app(model="some-model")
-    async with app.run_test():
-        banner = app.query_one("#banner", Static)
-        assert "some-model" in str(banner.render())
-        assert app.query_one("#conversation", VerticalScroll).children[0] is banner
-        assert isinstance(app.query_one("#tools"), ToolPanel)
-        assert app.query_one("#status", Static)
-        assert app.query_one("#prompt", PromptArea).has_focus
+def texts(app: App[None], selector: str) -> list[str]:
+    return [str(w.render()) for w in app.query(selector)]
 
 
-async def test_tab_toggles_tools_panel() -> None:
-    app = make_app()
-    async with app.run_test() as pilot:
-        tools = app.query_one("#tools")
-        assert tools.display
-        await pilot.press("tab")
-        assert not tools.display
-        await pilot.press("tab")
-        assert tools.display
+def status_line(app: AgentApp) -> str:
+    return str(app.query_one("#status", Static).render())
 
 
-async def test_submit_echoes_message_and_clears_input() -> None:
-    app = make_app(replies(EXIT_HI))
-    async with app.run_test() as pilot:
-        await pilot.press(*"hello", "enter")
-        await settle(app, pilot)
-        messages = app.query(".message.user")
-        assert [str(m.render()) for m in messages] == ["> hello"]
-        assert app.query_one("#prompt", PromptArea).text == ""
-
-
-async def test_blank_submit_is_ignored() -> None:
-    app = make_app()
-    async with app.run_test() as pilot:
-        await pilot.press("space", "enter")
-        assert len(app.query(".message")) == 0
-
-
-async def test_ctrl_j_adds_newline_without_submitting() -> None:
-    app = make_app()
-    async with app.run_test() as pilot:
-        await pilot.press("a", "ctrl+j", "b")
-        assert app.query_one("#prompt", PromptArea).text == "a\nb"
-        assert len(app.query(".message")) == 0
-
-
-async def test_multiline_message_is_submitted_whole() -> None:
-    app = make_app(replies(EXIT_HI))
-    async with app.run_test() as pilot:
-        await pilot.press("a", "ctrl+j", "b", "enter")
-        await settle(app, pilot)
-        assert [str(m.render()) for m in app.query(".message.user")] == ["> a\nb"]
-        assert app.query_one("#prompt", PromptArea).text == ""
-
-
-# --- status_for ---------------------------------------------------------
-
-
-def test_status_for_zero_exit_is_ok() -> None:
-    assert status_for(BashResult.completed("true", "", "", 0)) == "ok"
-
-
-def test_status_for_nonzero_exit_is_failed() -> None:
-    assert status_for(BashResult.completed("false", "", "", 1)) == "failed"
-
-
-def test_status_for_timeout_is_failed() -> None:
-    assert status_for(BashResult.timeout("sleep 9")) == "failed"
-
-
-# --- ToolRow ------------------------------------------------------------
-
-
-class RowApp(App[None]):
-    def __init__(self, cmd: str) -> None:
-        super().__init__()
-        self.cmd = cmd
-
-    def compose(self) -> ComposeResult:
-        yield ToolRow(BashCall(id="t1", cmd=self.cmd))
-
-
-def classes_of(row: ToolRow) -> set[str]:
-    return {c for c in row.classes if c in {"running", "ok", "failed", "cancelled"}}
-
-
-async def test_tool_row_starts_running() -> None:
-    app = RowApp("ls")
-    async with app.run_test():
-        row = app.query_one(ToolRow)
-        assert row.status == "running"
-        assert classes_of(row) == {"running"}
-
-
-async def test_tool_row_set_status_swaps_the_class() -> None:
-    app = RowApp("ls")
-    async with app.run_test():
-        row = app.query_one(ToolRow)
-        for status in ("ok", "failed", "cancelled"):
-            row.set_status(status)
-            assert row.status == status
-            assert classes_of(row) == {status}
-
-
-async def test_tool_row_shows_command_on_one_line() -> None:
-    app = RowApp("echo a\necho b")
-    async with app.run_test():
-        cmd = app.query_one(".cmd", Static)
-        assert str(cmd.render()) == "echo a echo b"
-
-
-async def test_tool_row_does_not_parse_markup_in_command() -> None:
-    app = RowApp("echo [bold]hi[/bold]")
-    async with app.run_test():
-        cmd = app.query_one(".cmd", Static)
-        assert str(cmd.render()) == "echo [bold]hi[/bold]"
-
-
-# --- forward_event ------------------------------------------------------
-
-
-def call(id: str, cmd: str = "ls") -> BashCall:
-    return BashCall(id=id, cmd=cmd)
-
-
-def done(cmd: str, returncode: int) -> BashResult:
-    return BashResult.completed(cmd, "", "", returncode)
+def prompt_text(app: AgentApp) -> str:
+    return app.query_one("#prompt", PromptArea).text
 
 
 def row_for(app: AgentApp, id: str) -> ToolRow:
@@ -176,171 +95,262 @@ def row_for(app: AgentApp, id: str) -> ToolRow:
     return row
 
 
-async def test_tool_start_mounts_a_running_row_in_the_tools_panel() -> None:
-    app = make_app()
-    async with app.run_test() as pilot:
-        app.forward_event(ToolStart(call("a", "ls -la")))
+# --- layout and prompt ---------------------------------------------------
+
+
+class TestLayout:
+    async def test_banner_opens_the_conversation_and_prompt_has_focus(
+        self, app: AgentApp, pilot: Pilot[None]
+    ) -> None:
+        banner = app.query_one("#banner", Static)
+        assert MODEL in str(banner.render())
+        assert app.query_one("#conversation", VerticalScroll).children[0] is banner
+        assert app.query_one("#prompt", PromptArea).has_focus
+
+    async def test_tab_toggles_tools_panel(
+        self, app: AgentApp, pilot: Pilot[None]
+    ) -> None:
+        """Tab is a priority binding, so it wins over the focused TextArea."""
+        tools = app.query_one("#tools")
+        displayed: list[bool] = []
+        for _ in range(2):
+            await pilot.press("tab")
+            displayed.append(tools.display)
+        assert displayed == [False, True]
+
+
+class TestPrompt:
+    @pytest.mark.parametrize(
+        "keys,echo",
+        [
+            pytest.param([*"hello", "enter"], "> hello", id="single-line"),
+            pytest.param(["a", "ctrl+j", "b", "enter"], "> a\nb", id="multi-line"),
+        ],
+    )
+    async def test_enter_submits_the_whole_text_and_clears_the_prompt(
+        self, app: AgentApp, pilot: Pilot[None], keys: list[str], echo: str
+    ) -> None:
+        await pilot.press(*keys)
+        await settle(app, pilot)
+        assert texts(app, ".message.user") == [echo]
+        assert prompt_text(app) == ""
+
+    @pytest.mark.parametrize(
+        "keys,left_in_prompt",
+        [
+            pytest.param(["space", "enter"], "", id="blank-enter"),
+            pytest.param(["a", "ctrl+j", "b"], "a\nb", id="ctrl+j-is-a-newline"),
+        ],
+    )
+    async def test_does_not_submit(
+        self, app: AgentApp, pilot: Pilot[None], keys: list[str], left_in_prompt: str
+    ) -> None:
+        await pilot.press(*keys)
+        await settle(app, pilot)
+        assert texts(app, ".message") == []
+        assert prompt_text(app) == left_in_prompt
+
+
+# --- tool rows -----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "result,status",
+    [
+        pytest.param(ok("true"), "ok", id="exit-0"),
+        pytest.param(FAILED, "failed", id="exit-1"),
+        pytest.param(BashResult.timeout("sleep 9"), "failed", id="timeout"),
+    ],
+)
+def test_status_for(result: BashResult, status: Status) -> None:
+    assert status_for(result) == status
+
+
+class RowApp(App[None]):
+    """Hosts a single ToolRow, to test the widget on its own."""
+
+    def __init__(self, row: ToolRow) -> None:
+        super().__init__()
+        self.row = row
+
+    def compose(self) -> ComposeResult:
+        yield self.row
+
+
+class TestToolRow:
+    @pytest.fixture
+    def cmd(self) -> str:
+        return "ls"
+
+    @pytest.fixture
+    async def row(self, cmd: str) -> AsyncIterator[ToolRow]:
+        app = RowApp(ToolRow(BashCall(id="t1", cmd=cmd)))
+        async with app.run_test():
+            yield app.row
+
+    @staticmethod
+    def status_classes(row: ToolRow) -> set[str]:
+        return set(row.classes) & {"running", "ok", "failed", "cancelled"}
+
+    async def test_starts_running(self, row: ToolRow) -> None:
+        assert self.status_classes(row) == {"running"}
+
+    @pytest.mark.parametrize("status", ["ok", "failed", "cancelled"])
+    async def test_set_status_replaces_the_css_class(
+        self, row: ToolRow, status: Status
+    ) -> None:
+        """The colour lives in CSS, so exactly one status class may be set."""
+        row.set_status(status)
+        assert self.status_classes(row) == {status}
+
+    @pytest.mark.parametrize(
+        "cmd,shown",
+        [
+            pytest.param("echo a\necho b", "echo a echo b", id="one-line"),
+            pytest.param("echo [b]hi[/b]", "echo [b]hi[/b]", id="no-markup"),
+        ],
+    )
+    async def test_shows_the_command(self, row: ToolRow, shown: str) -> None:
+        assert str(row.query_one(".cmd", Static).render()) == shown
+
+
+class TestCoreEvents:
+    """forward_event turns core events into rows and status text."""
+
+    async def test_tool_start_mounts_a_running_row_in_the_tools_panel(
+        self, app: AgentApp, pilot: Pilot[None]
+    ) -> None:
+        app.forward_event(ToolStart(LS))
         await pilot.pause()
-        (row,) = app.query_one("#tools", ToolPanel).query(ToolRow)
+        (row,) = app.query_one("#tools").query(ToolRow)
         assert row.status == "running"
-        assert str(row.query_one(".cmd", Static).render()) == "ls -la"
+        assert row.call == LS
 
-
-async def test_tool_end_zero_exit_marks_row_ok() -> None:
-    app = make_app()
-    async with app.run_test() as pilot:
-        c = call("a")
-        app.forward_event(ToolStart(c))
-        app.forward_event(ToolEnd(c, done("ls", 0)))
+    @pytest.mark.parametrize(
+        "end,status",
+        [
+            pytest.param(ToolEnd(LS, ok("ls")), "ok", id="end-ok"),
+            pytest.param(ToolEnd(LS, FAILED), "failed", id="end-failed"),
+            pytest.param(ToolCancelled(LS), "cancelled", id="cancelled"),
+        ],
+    )
+    async def test_end_event_sets_the_row_status(
+        self, app: AgentApp, pilot: Pilot[None], end: Event, status: Status
+    ) -> None:
+        app.forward_event(ToolStart(LS))
+        app.forward_event(end)
         await pilot.pause()
-        assert row_for(app, "a").status == "ok"
+        assert row_for(app, "a").status == status
 
-
-async def test_tool_end_nonzero_exit_marks_row_failed() -> None:
-    app = make_app()
-    async with app.run_test() as pilot:
-        c = call("a")
-        app.forward_event(ToolStart(c))
-        app.forward_event(ToolEnd(c, done("ls", 1)))
-        await pilot.pause()
-        assert row_for(app, "a").status == "failed"
-
-
-async def test_tool_end_timeout_marks_row_failed() -> None:
-    app = make_app()
-    async with app.run_test() as pilot:
-        c = call("a", "sleep 9")
-        app.forward_event(ToolStart(c))
-        app.forward_event(ToolEnd(c, BashResult.timeout("sleep 9")))
-        await pilot.pause()
-        assert row_for(app, "a").status == "failed"
-
-
-async def test_tool_cancelled_marks_row_cancelled() -> None:
-    app = make_app()
-    async with app.run_test() as pilot:
-        c = call("a")
-        app.forward_event(ToolStart(c))
-        app.forward_event(ToolCancelled(c))
-        await pilot.pause()
-        assert row_for(app, "a").status == "cancelled"
-
-
-async def test_parallel_tools_are_matched_by_id() -> None:
-    app = make_app()
-    async with app.run_test() as pilot:
-        a, b = call("a", "ls"), call("b", "false")
-        app.forward_event(ToolStart(a))
+    async def test_parallel_tools_are_matched_by_id(
+        self, app: AgentApp, pilot: Pilot[None]
+    ) -> None:
+        b = BashCall(id="b", cmd="false")
+        app.forward_event(ToolStart(LS))
         app.forward_event(ToolStart(b))
-        app.forward_event(ToolEnd(b, done("false", 1)))  # B finishes first
+        app.forward_event(ToolEnd(b, FAILED))  # b finishes first
         await pilot.pause()
-        assert row_for(app, "a").status == "running"
-        assert row_for(app, "b").status == "failed"
-        app.forward_event(ToolEnd(a, done("ls", 0)))
-        await pilot.pause()
-        assert row_for(app, "a").status == "ok"
+        assert (row_for(app, "a").status, row_for(app, "b").status) == (
+            "running",
+            "failed",
+        )
 
-
-async def test_turn_start_updates_the_status_line() -> None:
-    app = make_app()
-    async with app.run_test() as pilot:
+    async def test_turn_start_updates_the_status_line(
+        self, app: AgentApp, pilot: Pilot[None]
+    ) -> None:
         app.forward_event(TurnStart(0, 5))
         await pilot.pause()
-        assert str(app.query_one("#status", Static).render()) == "Working… turn 1/5"
+        assert status_line(app) == "Working… turn 1/5"
 
 
-async def test_tool_end_without_start_fails_loudly() -> None:
-    app = make_app()
-    with pytest.raises(KeyError):
-        async with app.run_test() as pilot:
-            app.forward_event(ToolEnd(call("ghost"), done("ls", 0)))
-            await pilot.pause()
+# --- running turns -------------------------------------------------------
 
 
-# --- worker -------------------------------------------------------------
+class TestTurn:
+    """A submitted message runs the real run_agent with the fake model."""
 
-
-def texts(app: AgentApp, selector: str) -> list[str]:
-    return [str(w.render()) for w in app.query(selector)]
-
-
-async def submit(app: AgentApp, pilot: Any, text: str) -> None:
-    await pilot.press(*text, "enter")
-    await settle(app, pilot)
-
-
-async def test_submit_runs_the_agent_and_shows_the_answer() -> None:
-    app = make_app(replies(EXIT_HI))
-    async with app.run_test() as pilot:
+    @pytest.mark.parametrize(
+        "script,shown,roles",
+        [
+            pytest.param(
+                [EXIT_HI],
+                (".message.assistant", "hi"),
+                ["system", "user", "assistant"],
+                id="answer",
+            ),
+            pytest.param(
+                [LlmError("boom")],
+                (".message.error", "boom"),
+                ["system", "user"],  # kept, so the user can retry
+                id="llm-error",
+            ),
+        ],
+    )
+    async def test_outcome_is_shown_and_the_turn_cleaned_up(
+        self,
+        app: AgentApp,
+        pilot: Pilot[None],
+        shown: tuple[str, str],
+        roles: list[str],
+    ) -> None:
         await submit(app, pilot, "yo")
-        assert texts(app, ".message.user") == ["> yo"]
-        assert texts(app, ".message.assistant") == ["hi"]
+        selector, text = shown
+        assert texts(app, selector) == [text]
+        assert [m["role"] for m in app.messages] == roles
         assert not app.busy
-        assert str(app.query_one("#status", Static).render()) == ""
-        assert [m["role"] for m in app.messages] == ["system", "user", "assistant"]
+        assert status_line(app) == ""
 
-
-async def test_tool_turn_shows_a_finished_row_then_the_answer() -> None:
-    app = make_app(replies("<action><bash>true</bash></action>", EXIT_HI))
-    async with app.run_test() as pilot:
+    @pytest.mark.parametrize("script", [[BASH_TRUE, EXIT_HI]])
+    async def test_tool_turn_leaves_a_finished_row(
+        self, app: AgentApp, pilot: Pilot[None]
+    ) -> None:
         await submit(app, pilot, "go")
         (row,) = app.query(ToolRow)
         assert row.status == "ok"
         assert texts(app, ".message.assistant") == ["hi"]
 
+    @pytest.mark.parametrize("script", [[EXIT_HI, EXIT_HI]])
+    async def test_next_turn_continues_the_history(
+        self, app: AgentApp, pilot: Pilot[None]
+    ) -> None:
+        await submit(app, pilot, "a")
+        await submit(app, pilot, "b")
+        assert [m["content"] for m in app.messages[1:]] == ["a", EXIT_HI, "b", EXIT_HI]
 
-async def test_llm_error_is_shown_and_session_kept() -> None:
-    async def broken(_messages: list[Message]) -> str:
-        raise LlmError("boom")
-
-    app = make_app(broken)
-    async with app.run_test() as pilot:
-        await submit(app, pilot, "yo")
-        assert texts(app, ".message.error") == ["boom"]
-        assert texts(app, ".message.user") == ["> yo"]  # the user's text stays visible
-        assert [m["role"] for m in app.messages] == ["system", "user"]
-        assert not app.busy
-        assert str(app.query_one("#status", Static).render()) == ""
+    async def test_first_prompt_is_submitted_on_start(self) -> None:
+        app = AgentApp(replies(EXIT_HI), ok_tool, first_prompt="hello")
+        async with app.run_test() as pilot:
+            await settle(app, pilot)
+            assert texts(app, ".message.user") == ["> hello"]
+            assert texts(app, ".message.assistant") == ["hi"]
 
 
-async def test_submit_while_busy_keeps_text_and_starts_no_second_turn() -> None:
-    release = asyncio.Event()
+class TestWhileBusy:
+    """The model blocks until the test releases it, so the turn stays running."""
 
-    async def slow(_messages: list[Message]) -> str:
-        await release.wait()
-        return EXIT_HI
+    @pytest.fixture
+    def release(self) -> asyncio.Event:
+        return asyncio.Event()
 
-    app = make_app(slow)
-    async with app.run_test() as pilot:
+    @pytest.fixture
+    def llm(self, release: asyncio.Event) -> LlmCall:
+        async def blocked(_messages: list[Message]) -> str:
+            await release.wait()
+            return EXIT_HI
+
+        return blocked
+
+    async def test_submit_keeps_the_text_and_starts_no_second_turn(
+        self, app: AgentApp, pilot: Pilot[None], release: asyncio.Event
+    ) -> None:
         await pilot.press(*"one", "enter")
-        await pilot.pause()
-        assert app.busy
         await pilot.press(*"two", "enter")
         await pilot.pause()
-        assert app.query_one("#prompt", PromptArea).text == "two"
+        assert app.busy
+        assert prompt_text(app) == "two"
         assert texts(app, ".message.user") == ["> one"]
+
         release.set()
         await settle(app, pilot)
         assert not app.busy
-
-
-async def test_next_turn_sees_the_earlier_history() -> None:
-    seen: list[int] = []
-
-    async def call(messages: list[Message]) -> str:
-        seen.append(len(messages))
-        return EXIT_HI
-
-    app = make_app(call)
-    async with app.run_test() as pilot:
-        await submit(app, pilot, "a")
-        await submit(app, pilot, "b")
-        assert seen == [2, 4]  # system+user, then system+user+assistant+user
-
-
-async def test_first_prompt_is_submitted_on_start() -> None:
-    app = make_app(replies(EXIT_HI), first_prompt="hello")
-    async with app.run_test() as pilot:
-        await settle(app, pilot)
-        assert texts(app, ".message.user") == ["> hello"]
         assert texts(app, ".message.assistant") == ["hi"]
