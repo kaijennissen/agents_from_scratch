@@ -4,6 +4,8 @@ No agent is wired in yet; submitting a message only echoes it into the
 conversation.
 """
 
+from typing import Literal
+
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -11,9 +13,51 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.message import Message
 from textual.widgets import Footer, Static, TextArea
 
+from agents_from_scratch.agent import BashResult, ToolCall
 from agents_from_scratch.banner import render_banner
 
 DEFAULT_MODEL = "unknown-model"
+
+type Status = Literal["running", "ok", "failed", "cancelled"]
+
+
+def status_for(result: BashResult) -> Status:
+    """The one place that decides what counts as a failed tool call."""
+    if result.timed_out or result.returncode != 0:
+        return "failed"
+    return "ok"
+
+
+class ToolRow(Horizontal):
+    """One tool call: a coloured bullet and the command on a single line.
+
+    The status is a CSS class (`running`, `ok`, `failed`, `cancelled`), so the
+    colours live in CSS and tests can assert on the class.
+    """
+
+    DEFAULT_CSS = """
+    ToolRow { height: 1; }
+    ToolRow .bullet { width: 2; }
+    ToolRow .cmd { width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }
+    ToolRow.running .bullet { color: $warning; }
+    ToolRow.ok .bullet { color: $success; }
+    ToolRow.failed .bullet { color: $error; }
+    ToolRow.cancelled .bullet { color: $text-muted; }
+    """
+
+    def __init__(self, call: ToolCall) -> None:
+        super().__init__(classes="running")
+        self.call = call
+        self.status: Status = "running"
+
+    def compose(self) -> ComposeResult:
+        yield Static("●", classes="bullet")
+        yield Static(self.call.cmd.replace("\n", " "), classes="cmd", markup=False)
+
+    def set_status(self, status: Status) -> None:
+        self.remove_class(self.status)
+        self.add_class(status)
+        self.status = status
 
 
 class ToolPanel(VerticalScroll):
