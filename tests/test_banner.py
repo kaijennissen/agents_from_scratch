@@ -28,3 +28,4 @@ def test_color_prompt_wraps_codes_only_for_readline() -> None:
     assert raw.count("❯") == 3 and "\001" not in raw
     assert wrapped.count("\001") == wrapped.count("\002") == 4
     assert wrapped.replace("\001", "").replace("\002", "") == raw
+

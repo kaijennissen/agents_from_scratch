@@ -9,7 +9,7 @@ A coding agent built from scratch: a small act → observe → decide loop that 
 local LLM (served by Ollama) for a shell command, runs it, and feeds the output back
 until the model declares the task done.
 
-![koding agent start-up banner](docs/images/startup-banner.png)
+![koding agent terminal UI](docs/images/tui.png)
 
 > [!CAUTION]
 > **Never run this agent directly on your host system.**
