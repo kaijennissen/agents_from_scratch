@@ -6,15 +6,25 @@ actions; mixing the two is not allowed. The loop ends when the model
 emits <exit> or the turn budget runs out.
 """
 
-import argparse
+import asyncio
+import logging
+import os
 import re
-import subprocess
-import time
-from typing import TypedDict, cast
+import signal
+import uuid
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Self, TypedDict, assert_never, cast
 
 import httpx2
+from httpx2 import AsyncClient
 
-from agents_from_scratch.banner import GREY, RESET, print_banner, prompt_text, use_color
+from agents_from_scratch.banner import GREY, RESET, rgb
+
+RED = rgb("#FF5555")
+GREEN = rgb("#50FA7B")
+YELLOW = rgb("#FFCC00")
+
 
 # OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
 OLLAMA_ENDPOINT = "http://host.docker.internal:11434/api/chat"
@@ -23,11 +33,6 @@ MODEL = "qwen3.8:27b-mlx"
 DEFAULT_MAX_TURNS = 25  # safety net; the agent is meant to stop itself with <exit>
 MAX_OUTPUT_CHARS = 2000  # tool output is context we pay for on every later turn
 COMMAND_TIMEOUT = 120  # seconds; a wall-clock limit per command, not per loop
-
-
-class Message(TypedDict):
-    role: str
-    content: str
 
 
 SYSTEM_PROMPT = f"""You are an autonomous coding agent. You solve the user's task in turns: you act, observe the results, then decide what to do next.
@@ -87,25 +92,127 @@ Examples:
 """
 
 
-def llm_call(messages: list[Message], retries: int = 3) -> str:
-    """POST to Ollama, retrying transient failures with exponential backoff."""
-    for attempt in range(retries + 1):
+MIXED_ACTIONS_ERROR = (
+    "Invalid action: a turn may contain either a single <exit> tag "
+    "or one or more <bash> tags, but not both. Re-issue the action "
+    "with a single action type."
+)
+
+
+class Message(TypedDict):
+    role: str
+    content: str
+
+
+@dataclass(frozen=True)
+class BashResult:
+    cmd: str
+    stdout: str
+    stderr: str
+    returncode: int | None
+    timed_out: bool
+
+    @classmethod
+    def completed(
+        cls, cmd: str, stdout: str, stderr: str, returncode: int | None
+    ) -> Self:
+        return cls(cmd, stdout, stderr, returncode, timed_out=False)
+
+    @classmethod
+    def timeout(cls, cmd: str, stdout: str = "", stderr: str = "") -> Self:
+        return cls(cmd, stdout, stderr, returncode=None, timed_out=True)
+
+
+@dataclass(frozen=True, kw_only=True)
+class BashCall:
+    id: str
+    cmd: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class SkillCall:
+    id: str
+    name: str
+
+
+type ToolCall = BashCall
+type RunTool = Callable[[str], Awaitable[BashResult]]  # cmd -> result
+
+
+@dataclass(frozen=True)
+class ToolStart:
+    call: ToolCall
+
+
+@dataclass(frozen=True)
+class ToolEnd:
+    call: ToolCall
+    result: BashResult
+
+
+@dataclass(frozen=True)
+class ToolCancelled:
+    call: ToolCall
+
+
+type Event = ToolStart | ToolEnd | ToolCancelled | TurnStart
+type OnEvent = Callable[[Event], None]  # plain def, must return immediately
+type LlmCall = Callable[[list[Message]], Awaitable[str]]  # history -> reply
+
+
+@dataclass(frozen=True)
+class TurnStart:
+    turn: int
+    max_turns: int
+
+
+def create_uuid():
+    return str(uuid.uuid4()).split("-")[0]
+
+
+def format_observation(result: BashResult) -> str:
+    """Turn a BashResult into the text the model reads."""
+    if result.timed_out:
+        return (
+            f"Command `{result.cmd}` was killed because it hit the time limit. "
+            "It did not finish, so its result and side effects are unknown, "
+            "and any output it produced was discarded."
+        )
+    return (
+        f"Command `{result.cmd}` finished with exit code {result.returncode}.\n"
+        f'stdout: "{result.stdout}"\n'
+        f'stderr: "{result.stderr}"'
+    )
+
+
+class LlmError(Exception):
+    """The model gave no usable reply. The message is meant for the user.
+
+    Front ends catch this one type and keep the session alive; the history is
+    unchanged by the failed call, so the same run can simply be retried.
+    """
+
+
+async def llm_call(client: AsyncClient, messages: list[Message]) -> str:
+    """Ask Ollama for the next reply; every failure is raised as LlmError."""
+    try:
+        response = await client.post(
+            "/api/chat", json={"model": MODEL, "stream": False, "messages": messages}
+        )
+    except httpx2.HTTPError as e:
+        raise LlmError(f"Could not reach the model: {e}") from e
+
+    if response.is_error:
         try:
-            r = httpx2.post(
-                OLLAMA_ENDPOINT,
-                json={"model": MODEL, "stream": False, "messages": messages},
-                timeout=120,
-            )
-            r.raise_for_status()
-            return cast(str, r.json()["message"]["content"])
-        except (httpx2.TransportError, httpx2.HTTPStatusError) as e:
-            retryable = not isinstance(e, httpx2.HTTPStatusError) or (
-                e.response.status_code >= 500 or e.response.status_code == 429
-            )
-            if attempt == retries or not retryable:
-                raise
-            time.sleep(2**attempt)
-    raise AssertionError("unreachable")
+            detail = response.json()["error"]  # Ollama puts its reason here
+        except ValueError, KeyError, TypeError:
+            detail = response.text
+        raise LlmError(f"Model request failed ({response.status_code}): {detail}")
+
+    try:
+        return cast(str, response.json()["message"]["content"])
+    except (ValueError, KeyError, TypeError) as e:
+        raise LlmError(f"Unexpected reply from the model: {response.text}") from e
 
 
 def parse_xml(tag: str, string: str) -> list[str]:
@@ -119,9 +226,8 @@ def parse_action(text: str) -> dict[str, list[str]]:
 
     A turn is either a single <exit> or one-or-more <bash> actions. Every
     action in the reply must be of the same type; a reply that mixes <exit>
-    with <bash> is invalid and is reported as an error. Returns
-    {"exit": ["No action"]} when there is no recognised tag at all, so the
-    loop always terminates cleanly.
+    with <bash> is invalid and is reported as an error. A reply with no
+    recognised tag at all is also an error, so the model can retry.
     """
     exit_bodies = parse_xml("exit", text)
     bash_bodies = parse_xml("bash", text)
@@ -129,12 +235,7 @@ def parse_action(text: str) -> dict[str, list[str]]:
         # Mixing the two action types is not allowed. Signal the mistake as
         # an error so the loop can feed it back and the model can retry,
         # rather than silently terminating.
-        error = (
-            "Invalid action: a turn may contain either a single <exit> tag "
-            "or one or more <bash> tags, but not both. Re-issue the action "
-            "with a single action type."
-        )
-        return {"error": [error]}
+        return {"error": [MIXED_ACTIONS_ERROR]}
     if exit_bodies:
         return {"exit": exit_bodies}
     if bash_bodies:
@@ -142,96 +243,126 @@ def parse_action(text: str) -> dict[str, list[str]]:
     return {"error": ["Couldn't parse any action. Please retry!"]}
 
 
-def run_agent(messages: list[Message], max_turns: int) -> tuple[str, list[Message]]:
-    for turn in range(max_turns):
-        if use_color():
+def print_event(event: Event) -> None:
+    match event:
+        case TurnStart(turn=turn, max_turns=max_turns):
             print(f"{GREY}Turn: {turn}/{max_turns}{RESET}")
-        else:
-            print(f"Turn: {turn}/{max_turns}")
-        response = llm_call(messages)
+        case ToolStart(call=BashCall(cmd=cmd)):
+            print(f"{YELLOW}running: {cmd}{RESET}")
+
+        case ToolEnd(call=BashCall(cmd=cmd), result=BashResult(returncode=0)):
+            print(f"{GREEN}success: {cmd}{RESET}")
+        case ToolEnd(call=BashCall(cmd=cmd), result=BashResult(timed_out=True)):
+            print(f"{RED}timeout: {cmd}{RESET}")
+        case ToolEnd(call=BashCall(cmd=cmd), result=BashResult(returncode=code)):
+            print(f"{RED}failure (exit {code}): {cmd}{RESET}")
+        case ToolCancelled(call=BashCall(cmd=cmd)):
+            print(f"{RED}cancelled: {cmd}{RESET}")
+        case _:
+            assert_never(event)
+
+
+async def run_bash_tool(cmd: str, *, timeout: float) -> BashResult:
+    proc = await asyncio.create_subprocess_shell(
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    proc_id = proc.pid
+
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        return BashResult.completed(
+            cmd=cmd,
+            stdout=stdout.decode(errors="replace"),
+            stderr=stderr.decode(errors="replace"),
+            returncode=proc.returncode,
+        )
+
+    except TimeoutError:
+        return BashResult.timeout(cmd)
+
+    finally:
+        try:
+            os.killpg(proc_id, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await proc.wait()
+
+
+def _ignore(_: Event) -> None: ...
+
+
+def emit(on_event: OnEvent, event: Event) -> None:
+    """Call the front end's callback; a broken callback must not kill the agent.
+
+    Catches Exception, not BaseException, so CancelledError still passes through.
+    """
+    try:
+        on_event(event)
+    except Exception:
+        logging.exception("on_event failed")
+
+
+async def run_tool(
+    tool_call: ToolCall,
+    tool_fn: RunTool,
+    on_event: OnEvent = _ignore,
+) -> BashResult:
+    emit(on_event, ToolStart(call=tool_call))
+    try:
+        result = await tool_fn(tool_call.cmd)
+    except asyncio.CancelledError:
+        emit(on_event, ToolCancelled(call=tool_call))
+        raise
+    emit(on_event, ToolEnd(call=tool_call, result=result))
+    return result
+
+
+async def run_agent(
+    messages: list[Message],
+    max_turns: int,
+    call: LlmCall,
+    tool_fn: RunTool,
+    on_event: OnEvent = _ignore,
+) -> tuple[str, list[Message]]:
+    for turn in range(max_turns):
+        emit(on_event, TurnStart(turn, max_turns))
+
+        response = await call(messages)
         # print(response)  # the model speaking: the one moment worth watching
-        messages.append({"role": "assistant", "content": response})
+        # not yet appended to messages such that a failure in executing the bash calls doesn't leave the agent in a partial state.
+        assistant_msg: Message = {"role": "assistant", "content": response}
 
         action = parse_action(response)
         if "exit" in action:
+            messages += [assistant_msg]
             return action["exit"][0], messages
         if "error" in action:
-            # The model mixed action types; tell it why and let it retry.
-            messages.append({"role": "user", "content": action["error"][0]})
+            # Invalid reply (mixed or no action); tell the model why and let it retry.
+            messages.extend(
+                [assistant_msg, {"role": "user", "content": action["error"][0]}]
+            )
             continue
+
         if "bash" in action:
             # One or more commands, executed in turn; every result is fed
             # back together in a single observation message.
-            observations: list[str] = []
-            for command in action["bash"]:
-                # Show the user which tool is being invoked, in dim grey.
-                if use_color():
-                    print(f"{GREY}$ {command}{RESET}")
-                else:
-                    print(f"$ {command}")
-                try:
-                    result = subprocess.run(
-                        command,
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        timeout=COMMAND_TIMEOUT,
-                    )
-                except subprocess.TimeoutExpired:
-                    # A hung command must not take the rest of the batch down.
-                    observations.append(
-                        f"Output of `$ {command}`:\n(killed: timed out after {COMMAND_TIMEOUT}s)"
-                    )
-                    continue
-                output = result.stdout
-                if len(output) > MAX_OUTPUT_CHARS:
-                    extra = len(output) - MAX_OUTPUT_CHARS
-                    output = f"{output[:MAX_OUTPUT_CHARS]}\n[output truncated, {extra} more chars]"
-                observations.append(
-                    f"Output of `$ {command}`:\n{output}\n(exit code {result.returncode})"
+            tool_calls = [BashCall(id=create_uuid(), cmd=cmd) for cmd in action["bash"]]
+            results = await asyncio.gather(
+                *(
+                    run_tool(tool_call, tool_fn=tool_fn, on_event=on_event)
+                    for tool_call in tool_calls
                 )
-            messages.append({"role": "user", "content": "\n\n".join(observations)})
+            )
+
+            observations = [format_observation(result) for result in results]
+            messages.extend(
+                [
+                    assistant_msg,
+                    {"role": "user", "content": "\n\n".join(observations)},
+                ]
+            )
 
     return f"Ran out of turns ({max_turns}) without an <exit> action.", messages
-
-
-def main(prompt: str | None, max_turns: int) -> None:
-    stop: bool = False
-    messages: list[Message] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-    ]
-
-    if prompt:
-        messages.append({"role": "user", "content": prompt})
-        answer, _ = run_agent(messages, max_turns=max_turns)
-        print("\n" + answer + "\n")
-    else:
-        print_banner(MODEL)  # interactive only; keeps -p output pipe-clean
-        while not stop:
-            prompt = input(prompt_text())
-            if prompt == "exit":
-                stop = True
-            else:
-                messages.append({"role": "user", "content": prompt})
-                answer, messages = run_agent(messages, max_turns=max_turns)
-                print("\n" + answer + "\n")
-
-
-def cli() -> None:
-    parser = argparse.ArgumentParser("Coding agent from scratch")
-    parser.add_argument("-p", "--prompt", required=False, type=str, help="the prompt")
-    parser.add_argument(
-        "-t",
-        "--max-turns",
-        default=DEFAULT_MAX_TURNS,
-        type=int,
-        help="max turns",
-    )
-    args = parser.parse_args()
-
-    main(prompt=args.prompt, max_turns=args.max_turns)
-
-
-if __name__ == "__main__":
-    cli()

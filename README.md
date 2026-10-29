@@ -30,8 +30,9 @@ What it does today:
 
 - **XML action loop** – every reply is one `<action>` containing either `<bash>`
   (run a command, get the output back) or `<exit>` (final answer).
-- **Interactive and one-shot modes** – a REPL with a coloured start-up banner, or
-  `--prompt` for a single task whose answer is printed pipe-clean.
+- **Three ways to run it** – a terminal UI (the default), a headless one-shot
+  (`--prompt`, answer printed pipe-clean), and a plain line-based REPL (`--plain`).
+  See [Modes](#modes).
 - **Bounded runs** – a turn budget (`--max-turns`), a 120 s timeout per command,
   and truncated tool output (2000 chars) so a runaway turn can't flood the context.
 - **Parallel tool calls** – a turn may batch several independent `<bash>` actions;
@@ -71,6 +72,32 @@ uv run ruff format .    # format
 uv run pyright          # type-check
 uv run pytest           # test
 ```
+
+## Modes
+
+```sh
+agents-from-scratch                    # TUI
+agents-from-scratch "fix the bug"      # TUI, with this as the first message
+agents-from-scratch -p "fix the bug"   # headless: run once, print the answer
+agents-from-scratch --plain            # line-based REPL
+```
+
+`-t/--max-turns N` applies to all modes. Combining `-p`, `--plain` and a positional
+prompt is an error.
+
+- **TUI** – conversation on the left, a live list of tool calls on the right
+  (yellow = running, green = exit 0, red = failed or timed out, grey = cancelled).
+  `Enter` sends, `Ctrl+J` adds a newline, `Tab` shows or hides the tools panel,
+  `Ctrl+C` quits. While a turn is running, `Enter` is refused and your text stays
+  in the prompt. If the model can't be reached the error is shown and the turn is
+  dropped from the history, so you can simply send again.
+- **Headless (`-p`)** – no terminal needed. Turn and tool progress goes to stdout,
+  followed by the answer. A model failure exits non-zero.
+- **`--plain`** – the original REPL. Type `exit` to leave.
+
+The TUI needs an interactive terminal on both stdin and stdout. Without one (a pipe,
+cron or CI, `docker run` without `-t`, `ssh host cmd` without `-t`) it exits with a
+hint instead of falling back silently; use `-p` there.
 
 ## Run the agent
 
@@ -115,7 +142,8 @@ To work on this repository itself, use `REPO=.`.
 
 Notes:
 
-- Omit `--prompt` for the interactive session. Omit the trailing command to get an
+- Omit `--prompt` to open the TUI (it needs `-it`, as in the command above), or add
+  `--plain` for the line-based REPL. Omit the trailing command to get an
   interactive shell in the same container instead.
 - The image ships Python, `uv`, `curl`, `jq` and `vim`. If the target repository
   needs other toolchains, add them to the `Dockerfile`; the agent can't install
