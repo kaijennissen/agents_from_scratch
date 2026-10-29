@@ -226,9 +226,8 @@ def parse_action(text: str) -> dict[str, list[str]]:
 
     A turn is either a single <exit> or one-or-more <bash> actions. Every
     action in the reply must be of the same type; a reply that mixes <exit>
-    with <bash> is invalid and is reported as an error. Returns
-    {"exit": ["No action"]} when there is no recognised tag at all, so the
-    loop always terminates cleanly.
+    with <bash> is invalid and is reported as an error. A reply with no
+    recognised tag at all is also an error, so the model can retry.
     """
     exit_bodies = parse_xml("exit", text)
     bash_bodies = parse_xml("bash", text)
@@ -341,7 +340,7 @@ async def run_agent(
             messages += [assistant_msg]
             return action["exit"][0], messages
         if "error" in action:
-            # The model mixed action types; tell it why and let it retry.
+            # Invalid reply (mixed or no action); tell the model why and let it retry.
             messages.extend(
                 [assistant_msg, {"role": "user", "content": action["error"][0]}]
             )
