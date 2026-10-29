@@ -61,8 +61,8 @@ def test_parse_xml(tag: str, text: str, expected: list[str]) -> None:
         pytest.param("<exit> done </exit>", {"exit": ["done"]}, id="exit"),
         pytest.param(
             "<unknown> Finished! </unknown>",
-            {"exit": ["No action"]},
-            id="no-tag-exits",
+            {"error": ["Couldn't parse any action. Please retry!"]},
+            id="no-tag-errors",
         ),
         pytest.param(
             "Sure!\n<action><bash>ls</bash></action>\nHope it helps.",
@@ -82,7 +82,7 @@ def test_parse_xml(tag: str, text: str, expected: list[str]) -> None:
     ],
 )
 def test_parse_action(text: str, expected: dict[str, list[str]]) -> None:
-    """One action type per turn; mixing is an error, an unknown reply a clean exit."""
+    """One action type per turn; mixing or an unknown reply is an error."""
     assert parse_action(text) == expected
 
 

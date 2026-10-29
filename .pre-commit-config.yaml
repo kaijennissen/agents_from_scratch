@@ -11,13 +11,6 @@ repos:
       - id: check-added-large-files
         args: ["--maxkb=5000"]
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.0
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.0
     hooks:
@@ -25,6 +18,20 @@ repos:
 
   - repo: local
     hooks:
+      # Run the lockfile's ruff (not a pinned pre-commit mirror) so the hooks
+      # and CI always use the same version.
+      - id: ruff
+        name: ruff
+        entry: uv run --locked ruff check --fix
+        language: system
+        types_or: [python]
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --locked ruff format
+        language: system
+        types_or: [python, markdown]
+
       - id: uv-lock-check
         name: uv lock --check
         entry: uv lock --check

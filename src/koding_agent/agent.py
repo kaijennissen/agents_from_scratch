@@ -32,9 +32,19 @@ MODEL = "qwen3.8:27b-mlx"
 
 DEFAULT_MAX_TURNS = 25  # safety net; the agent is meant to stop itself with <exit>
 MAX_OUTPUT_CHARS = 2000  # tool output is context we pay for on every later turn
+COMMAND_TIMEOUT = 120  # seconds; a wall-clock limit per command, not per loop
 
-SYSTEM_PROMPT = """You are an autonomous coding agent. You solve the user's task by taking one action at a time: you act, observe the result, then decide the next action.
+
+SYSTEM_PROMPT = f"""You are an autonomous coding agent. You solve the user's task in turns: you act, observe the results, then decide what to do next.
 Always explore your environment first. You're running on a computer and have access to a file-system as well as a bash-shell.
+
+How the harness works:
+- A turn is one reply from you and one reply from the harness. Every turn re-sends the whole conversation, so fewer turns and smaller outputs are cheaper.
+- Several <bash> tags in one action run in order, and all results come back together in the next message. Use this for commands that don't depend on each other's output, like reading several files or running the tests and the linter. If a command needs the output of another, put them in separate turns. A failing command does not stop the ones after it.
+- Each command runs in a fresh shell. `cd` and `export` do not carry over to the next command. Use absolute paths, or `cd dir && cmd` within one command.
+- Limits: a command is killed after {COMMAND_TIMEOUT}s, and output is cut after {MAX_OUTPUT_CHARS} characters (a marker tells you when). So use `head`, `grep` and `wc -l` instead of dumping large files, and don't start servers, watchers or interactive programs.
+- A reply that is not a valid <action> costs a turn. The harness sends back an error and you retry.
+- <exit> ends your turn and shows your answer to the user, who may reply. If you need clarification, ask it there.
 
 Every reply you send is a single <action> element. It contains either exactly one <exit> tag, or one or more <bash> tags. Do not mix <exit> with <bash> in the same action. Output only the <action> element, with nothing before or after it.
 
@@ -216,9 +226,8 @@ def parse_action(text: str) -> dict[str, list[str]]:
 
     A turn is either a single <exit> or one-or-more <bash> actions. Every
     action in the reply must be of the same type; a reply that mixes <exit>
-    with <bash> is invalid and is reported as an error. Returns
-    {"exit": ["No action"]} when there is no recognised tag at all, so the
-    loop always terminates cleanly.
+    with <bash> is invalid and is reported as an error. A reply with no
+    recognised tag at all is also an error, so the model can retry.
     """
     exit_bodies = parse_xml("exit", text)
     bash_bodies = parse_xml("bash", text)
@@ -231,7 +240,7 @@ def parse_action(text: str) -> dict[str, list[str]]:
         return {"exit": exit_bodies}
     if bash_bodies:
         return {"bash": bash_bodies}
-    return {"exit": ["No action"]}
+    return {"error": ["Couldn't parse any action. Please retry!"]}
 
 
 def print_event(event: Event) -> None:
@@ -331,7 +340,7 @@ async def run_agent(
             messages += [assistant_msg]
             return action["exit"][0], messages
         if "error" in action:
-            # The model mixed action types; tell it why and let it retry.
+            # Invalid reply (mixed or no action); tell the model why and let it retry.
             messages.extend(
                 [assistant_msg, {"role": "user", "content": action["error"][0]}]
             )
