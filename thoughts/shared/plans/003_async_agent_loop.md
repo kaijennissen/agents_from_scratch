@@ -65,7 +65,7 @@ async def run_agent(
     max_turns: int,
     *,
     llm_call: LlmCall,  # e.g. functools.partial(llm_call, client)
-    run_tool: RunTool = run,  # from async_experiments.py
+    run_tool: RunTool = run,  # from scripts/async_experiments.py
     on_event: OnEvent = lambda e: None,
 ) -> tuple[str, list[Message]]:
     for turn in range(max_turns):
@@ -204,7 +204,7 @@ Open: where the retry loop lives.
   and testable with a fake `LlmCall`. Needs the provider to say what is retryable, e.g. `LlmError(..., retryable=True)`.
 - Leaning: inside `llm_call` while there is one provider; move to the wrapper together with `providers.py`.
 
-## Tool execution (prototype: `async_experiments.py`)
+## Tool execution (prototype: `scripts/async_experiments.py`)
 
 - `create_subprocess_shell(..., start_new_session=True)`, with `wait_for` around `communicate()`.
 - `finally`: `os.killpg(proc.pid, SIGKILL)` (swallow `ProcessLookupError`), then `await proc.wait()`.
@@ -227,7 +227,7 @@ src/agents_from_scratch/
     __init__.py
     agent.py      # run_agent, parse_action, SYSTEM_PROMPT, llm_call
     events.py     # TurnStart, ToolStart, ToolEnd, Event, OnEvent
-    tools.py      # BashResult, run, format_observation, TIMEOUT   (from async_experiments.py)
+    tools.py      # BashResult, run, format_observation, TIMEOUT   (from scripts/async_experiments.py)
     providers.py  # later: one factory per backend that returns an LlmCall
   cli.py          # front end: argparse, print_event, asyncio.run, input loop
   tui.py          # front end: Textual App (later, see 004)
@@ -287,7 +287,7 @@ def openrouter(
 ## Later (not this branch)
 
 - TUI as a front end on the same loop (Textual worker); see `004_textual_tui.md`.
-- Partial output on timeout: read the streams into our own buffers (notes in `async_experiments.py`).
+- Partial output on timeout: read the streams into our own buffers (notes in `scripts/async_experiments.py`).
 - Streaming `llm_call` (tokens, reasoning toggle).
 - Persistent shell state (e.g. working directory).
 - A tool runner that raises instead of returning a `BashResult` (not a failed command, which is a normal result,
