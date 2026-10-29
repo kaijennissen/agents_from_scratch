@@ -16,6 +16,7 @@ from typing import Literal
 
 import httpx2
 
+from koding_agent import __version__
 from koding_agent.agent import (
     DEFAULT_MAX_TURNS,
     MODEL,
@@ -66,6 +67,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=60,
         type=float,
         help="seconds a bash command may run before it is killed (default: %(default)s)",
+    )
+    parser.add_argument(
+        "-v", "--version", action="version", version=f"%(prog)s {__version__}"
     )
     args = parser.parse_args(argv)
     if args.headless_prompt and args.plain:
