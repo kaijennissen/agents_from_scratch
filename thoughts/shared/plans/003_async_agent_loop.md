@@ -25,31 +25,47 @@ Make `run_agent` a **coroutine** with an **`on_event` callback**, in a shape tha
 ```python
 # events.py (core): frozen dataclasses, each tool event carries an id
 @dataclass(frozen=True)
-class TurnStart:  turn: int; max_turns: int
+class TurnStart:
+    turn: int
+    max_turns: int
+
+
 @dataclass(frozen=True)
-class ToolStart:  id: tuple[int, int]; command: str          # id = (turn, index)
+class ToolStart:
+    id: tuple[int, int]
+    command: str  # id = (turn, index)
+
+
 @dataclass(frozen=True)
-class ToolEnd:    id: tuple[int, int]; command: str; result: BashResult | None  # None = cancelled
+class ToolEnd:
+    id: tuple[int, int]
+    command: str
+    result: BashResult | None  # None = cancelled
+
+
 Event = TurnStart | ToolStart | ToolEnd
 
-type OnEvent  = Callable[[Event], None]                      # plain def, must not block
-type RunTool  = Callable[[str], Awaitable[BashResult]]
-type LlmCall  = Callable[[list[Message]], Awaitable[str]]
+type OnEvent = Callable[[Event], None]  # plain def, must not block
+type RunTool = Callable[[str], Awaitable[BashResult]]
+type LlmCall = Callable[[list[Message]], Awaitable[str]]
+
 
 # core
-class LlmError(Exception): ...                                # message is meant for the user
+class LlmError(Exception): ...  # message is meant for the user
+
 
 async def llm_call(client: httpx2.AsyncClient, messages) -> str:
     # network error, 4xx/5xx or malformed reply -> raise LlmError(...) from e
     r = await client.post(ENDPOINT, json={...})
     return r.json()["message"]["content"]
 
+
 async def run_agent(
     messages: list[Message],
     max_turns: int,
     *,
-    llm_call: LlmCall,          # e.g. functools.partial(llm_call, client)
-    run_tool: RunTool = run,    # from async_experiments.py
+    llm_call: LlmCall,  # e.g. functools.partial(llm_call, client)
+    run_tool: RunTool = run,  # from async_experiments.py
     on_event: OnEvent = lambda e: None,
 ) -> tuple[str, list[Message]]:
     for turn in range(max_turns):
@@ -68,14 +84,16 @@ async def run_agent(
         async def one(i: int, cmd: str) -> str:
             id = (turn, i)
             emit(on_event, ToolStart(id, cmd))
-            result = None                                    # stays None if cancelled
+            result = None  # stays None if cancelled
             try:
                 result = await run_tool(cmd)
                 return format_observation(cmd, result)
-            finally:                                         # also runs on cancellation
+            finally:  # also runs on cancellation
                 emit(on_event, ToolEnd(id, cmd, result))
 
-        observations = await asyncio.gather(*(one(i, c) for i, c in enumerate(action["bash"])))
+        observations = await asyncio.gather(
+            *(one(i, c) for i, c in enumerate(action["bash"]))
+        )
         # assistant message and observations are appended together AFTER the tools finish,
         # so a cancel never leaves a <bash> request without observations in the history
         messages += [assistant(response), user("\n\n".join(observations))]
@@ -87,7 +105,7 @@ def emit(on_event, event):
     try:
         on_event(event)
     except Exception:
-        pass            # a broken front end must not kill the agent (log it later)
+        pass  # a broken front end must not kill the agent (log it later)
 ```
 
 How it is used (the same core, two front ends):
@@ -96,26 +114,35 @@ How it is used (the same core, two front ends):
 # CLI (headless): on_event prints; the client lives for one asyncio.run
 async def amain(prompt, max_turns):
     async with httpx2.AsyncClient(timeout=120) as client:
-        answer, _ = await run_agent(msgs, max_turns,
-                                    llm_call=partial(llm_call, client),
-                                    on_event=print_event)
+        answer, _ = await run_agent(
+            msgs, max_turns, llm_call=partial(llm_call, client), on_event=print_event
+        )
+
 
 # TUI (later): runs on Textual's event loop, so on_event can touch widgets directly
 class AgentApp(App):
-    async def on_mount(self):   self.client = httpx2.AsyncClient(timeout=120)
-    async def on_unmount(self): await self.client.aclose()
+    async def on_mount(self):
+        self.client = httpx2.AsyncClient(timeout=120)
+
+    async def on_unmount(self):
+        await self.client.aclose()
 
     def on_event(self, ev):
         match ev:
-            case ToolStart(id, cmd):         self.tools.add_row(id, cmd)      # orange bullet
-            case ToolEnd(id, _, result):     self.tools.finish_row(id, result)  # green / red
+            case ToolStart(id, cmd):
+                self.tools.add_row(id, cmd)  # orange bullet
+            case ToolEnd(id, _, result):
+                self.tools.finish_row(id, result)  # green / red
 
     @work(exclusive=True)
     async def submit(self, text):
         try:
-            answer, self.messages = await run_agent(self.messages, 25,
-                                                    llm_call=partial(llm_call, self.client),
-                                                    on_event=self.on_event)
+            answer, self.messages = await run_agent(
+                self.messages,
+                25,
+                llm_call=partial(llm_call, self.client),
+                on_event=self.on_event,
+            )
         except LlmError as e:
             self.show_error(e)
         finally:
@@ -224,8 +251,12 @@ A provider is a factory that returns such a callable. `run_agent` does not chang
 
 ```python
 # providers.py
-def ollama(client, model, endpoint) -> LlmCall: ...       # POST /api/chat       -> message.content
-def openrouter(client, model, api_key) -> LlmCall: ...    # POST /chat/completions -> choices[0].message.content
+def ollama(
+    client, model, endpoint
+) -> LlmCall: ...  # POST /api/chat       -> message.content
+def openrouter(
+    client, model, api_key
+) -> LlmCall: ...  # POST /chat/completions -> choices[0].message.content
 ```
 
 - Each factory hides the differences in URL, auth header, request fields and response shape.
