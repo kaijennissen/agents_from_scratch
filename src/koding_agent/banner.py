@@ -1,8 +1,8 @@
 """Start-up banner and input prompt for koding agent.
 
-The "kai" wordmark is the logo, one brand colour per letter; the name
-repeats them on the "k" of koding and the "a" of agent (the lime dot of
-the "i" only exists in the SVG logo). Colour is
+The "kai" wordmark is the logo, one brand colour per letter. The name
+next to it is plain bold: "koding agent" has no "i", so there is no letter
+to carry the lime. Colour is
 dropped when stdout is not a terminal or when NO_COLOR is set
 (https://no-color.org).
 """
@@ -40,12 +40,7 @@ def render_banner(model: str, color: bool) -> str:
     k_top, a_top, i_top = "█▄▀", "▄▀█", "█"
     k_bot, a_bot, i_bot = "█ █", "█▀█", "█"
 
-    name = (
-        paint("k", BOLD, MAGENTA)
-        + paint("oding ", BOLD)
-        + paint("a", BOLD, BLUE)
-        + paint("gent", BOLD)
-    )
+    name = paint("koding agent", BOLD)
     meta = paint(f"v{__version__} · {model} · type 'exit' to quit", DIM)
 
     def logo(k: str, a: str, i: str) -> str:

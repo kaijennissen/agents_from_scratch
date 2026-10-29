@@ -28,3 +28,11 @@ def test_color_prompt_wraps_codes_only_for_readline() -> None:
     assert raw.count("❯") == 3 and "\001" not in raw
     assert wrapped.count("\001") == wrapped.count("\002") == 4
     assert wrapped.replace("\001", "").replace("\002", "") == raw
+
+
+def test_name_is_not_coloured() -> None:
+    from koding_agent.banner import BOLD, RESET
+
+    first_line = render_banner("m", color=True).splitlines()[0]
+
+    assert f"{BOLD}koding agent{RESET}" in first_line
