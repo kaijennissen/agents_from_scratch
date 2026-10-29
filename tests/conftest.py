@@ -1,6 +1,6 @@
 import pytest
 
-from agents_from_scratch.agent import Event
+from koding_agent.agent import Event
 
 
 @pytest.fixture

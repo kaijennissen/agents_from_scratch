@@ -1,7 +1,8 @@
-"""Start-up banner and input prompt for koding aigent.
+"""Start-up banner and input prompt for koding agent.
 
 The "kai" wordmark is the logo, one brand colour per letter; the name
-repeats them on the "k" of koding and the "ai" of aigent. Colour is
+repeats them on the "k" of koding and the "a" of agent (the lime dot of
+the "i" only exists in the SVG logo). Colour is
 dropped when stdout is not a terminal or when NO_COLOR is set
 (https://no-color.org).
 """
@@ -9,7 +10,7 @@ dropped when stdout is not a terminal or when NO_COLOR is set
 import os
 import sys
 
-from agents_from_scratch import __version__
+from koding_agent import __version__
 
 
 def rgb(hex_color: str) -> str:
@@ -43,7 +44,6 @@ def render_banner(model: str, color: bool) -> str:
         paint("k", BOLD, MAGENTA)
         + paint("oding ", BOLD)
         + paint("a", BOLD, BLUE)
-        + paint("i", BOLD, LIME)
         + paint("gent", BOLD)
     )
     meta = paint(f"v{__version__} · {model} · type 'exit' to quit", DIM)

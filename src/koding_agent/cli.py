@@ -1,8 +1,8 @@
 """Command line entry point: picks a mode and wires the core to a front end.
 
-    agents-from-scratch [PROMPT]       TUI; PROMPT, if given, is sent first
-    agents-from-scratch -p PROMPT      headless one-shot, pipe-clean output
-    agents-from-scratch --plain        line-based REPL
+    koding-agent [PROMPT]       TUI; PROMPT, if given, is sent first
+    koding-agent -p PROMPT      headless one-shot, pipe-clean output
+    koding-agent --plain        line-based REPL
 
 This is the only module that imports both the core and the front ends.
 """
@@ -16,7 +16,7 @@ from typing import Literal
 
 import httpx2
 
-from agents_from_scratch.agent import (
+from koding_agent.agent import (
     DEFAULT_MAX_TURNS,
     MODEL,
     RED,
@@ -30,7 +30,7 @@ from agents_from_scratch.agent import (
     run_agent,
     run_bash_tool,
 )
-from agents_from_scratch.banner import print_banner, prompt_text
+from koding_agent.banner import print_banner, prompt_text
 
 OLLAMA_URL = "http://host.docker.internal:11434"
 
@@ -42,7 +42,7 @@ def ollama_client() -> httpx2.AsyncClient:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser("Coding agent from scratch")
+    parser = argparse.ArgumentParser("koding-agent")
     parser.add_argument(
         "prompt", nargs="?", help="first message; opens the TUI with it already sent"
     )
@@ -126,7 +126,7 @@ async def run_plain(max_turns: int, tool_fn: RunTool) -> None:
 
 
 async def run_tui(max_turns: int, tool_fn: RunTool, first_prompt: str | None) -> None:
-    from agents_from_scratch.tui.app import AgentApp  # keeps Textual off the -p path
+    from koding_agent.tui.app import AgentApp  # keeps Textual off the -p path
 
     async with ollama_client() as client:
         app = AgentApp(

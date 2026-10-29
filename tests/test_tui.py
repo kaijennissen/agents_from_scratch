@@ -15,7 +15,8 @@ from textual.containers import VerticalScroll
 from textual.pilot import Pilot
 from textual.widgets import Static
 
-from agents_from_scratch.agent import (
+from fakes import ok, ok_tool, replies
+from koding_agent.agent import (
     BashCall,
     BashResult,
     Event,
@@ -27,14 +28,13 @@ from agents_from_scratch.agent import (
     ToolStart,
     TurnStart,
 )
-from agents_from_scratch.tui.app import (
+from koding_agent.tui.app import (
     AgentApp,
     PromptArea,
     Status,
     ToolRow,
     status_for,
 )
-from fakes import ok, ok_tool, replies
 
 MODEL = "some-model"
 EXIT_HI = "<action><exit>hi</exit></action>"

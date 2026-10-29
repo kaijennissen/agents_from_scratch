@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Self
 
-from agents_from_scratch.banner import RESET, rgb
+from koding_agent.banner import RESET, rgb
 
 TIMEOUT = 3
 

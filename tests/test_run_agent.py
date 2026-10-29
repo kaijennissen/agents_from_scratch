@@ -4,7 +4,8 @@ import asyncio
 
 import pytest
 
-from agents_from_scratch.agent import (
+from fakes import ok, ok_tool, replies
+from koding_agent.agent import (
     MIXED_ACTIONS_ERROR,
     SYSTEM_PROMPT,
     BashResult,
@@ -18,7 +19,6 @@ from agents_from_scratch.agent import (
     format_observation,
     run_agent,
 )
-from fakes import ok, ok_tool, replies
 
 BASH_LS = "<action><bash>ls</bash></action>"
 EXIT_DONE = "<action><exit>done</exit></action>"

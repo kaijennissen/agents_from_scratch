@@ -15,7 +15,7 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.message import Message
 from textual.widgets import Footer, Static, TextArea
 
-from agents_from_scratch.agent import (
+from koding_agent.agent import (
     DEFAULT_MAX_TURNS,
     SYSTEM_PROMPT,
     BashResult,
@@ -30,10 +30,10 @@ from agents_from_scratch.agent import (
     TurnStart,
     run_agent,
 )
-from agents_from_scratch.agent import (
+from koding_agent.agent import (
     Message as ChatMessage,
 )
-from agents_from_scratch.banner import render_banner
+from koding_agent.banner import render_banner
 
 DEFAULT_MODEL = "unknown-model"
 

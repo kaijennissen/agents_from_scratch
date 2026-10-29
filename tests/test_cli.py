@@ -2,8 +2,8 @@
 
 import pytest
 
-from agents_from_scratch import cli
-from agents_from_scratch.cli import Mode, parse_args, select_mode
+from koding_agent import cli
+from koding_agent.cli import Mode, parse_args, select_mode
 
 
 @pytest.mark.parametrize(
