@@ -1,6 +1,7 @@
 """run_agent: the act -> observe -> decide loop, driven by a fake model and fake tools."""
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -176,21 +177,21 @@ class TestRunAgent:
 
 
 @pytest.mark.parametrize("name", ["AGENTS.md", "agents.md", "Agents.MD"])
-def test_load_context_matches_any_casing(tmp_path, name):
+def test_load_context_matches_any_casing(tmp_path: Path, name: str) -> None:
     (tmp_path / name).write_text("be nice\n")
     ctx = load_context(tmp_path)
     assert ctx == Context(tmp_path / name, "be nice")
 
 
 @pytest.mark.parametrize("content", [None, "", "  \n"])
-def test_load_context_absent_or_empty(tmp_path, content):
+def test_load_context_absent_or_empty(tmp_path: Path, content: str | None) -> None:
     if content is not None:
         (tmp_path / "AGENTS.md").write_text(content)
     assert load_context(tmp_path) is None
 
 
 @pytest.mark.parametrize("with_context", [False, True])
-def test_system_prompt_includes_context(tmp_path, with_context):
+def test_system_prompt_includes_context(tmp_path: Path, with_context: bool) -> None:
     path = tmp_path / "AGENTS.md"
     prompt = build_system_prompt(Context(path, "be nice") if with_context else None)
     assert prompt.startswith(SYSTEM_PROMPT)
@@ -200,5 +201,5 @@ def test_system_prompt_includes_context(tmp_path, with_context):
 @pytest.mark.parametrize(
     ("argv", "expected"), [([], False), (["-nc"], True), (["--no-context"], True)]
 )
-def test_no_context_flag(argv, expected):
+def test_no_context_flag(argv: list[str], expected: bool) -> None:
     assert parse_args(argv).no_context is expected
