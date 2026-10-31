@@ -17,8 +17,8 @@ from textual.widgets import Footer, Static, TextArea
 
 from koding_agent.agent import (
     DEFAULT_MAX_TURNS,
-    SYSTEM_PROMPT,
     BashResult,
+    Context,
     Event,
     LlmCall,
     LlmError,
@@ -28,6 +28,7 @@ from koding_agent.agent import (
     ToolEnd,
     ToolStart,
     TurnStart,
+    build_system_prompt,
     run_agent,
 )
 from koding_agent.agent import (
@@ -170,15 +171,17 @@ class AgentApp(App[None]):
         model: str = DEFAULT_MODEL,
         max_turns: int = DEFAULT_MAX_TURNS,
         first_prompt: str | None = None,
+        context: Context | None = None,
     ) -> None:
         super().__init__()
+        self.context = context
         self.first_prompt = first_prompt
         self.call = call
         self.tool_fn = tool_fn
         self.model = model
         self.max_turns = max_turns
         self.messages: list[ChatMessage] = [
-            {"role": "system", "content": SYSTEM_PROMPT}
+            {"role": "system", "content": build_system_prompt(context)}
         ]
         self.busy = False
         self.rows: dict[str, ToolRow] = {}  # call.id -> row
@@ -189,7 +192,14 @@ class AgentApp(App[None]):
             conversation.border_title = "Conversation"
             with conversation:
                 yield Static(
-                    Text.from_ansi(render_banner(self.model, color=True)), id="banner"
+                    Text.from_ansi(
+                        render_banner(
+                            self.model,
+                            color=True,
+                            context=self.context.path.name if self.context else None,
+                        )
+                    ),
+                    id="banner",
                 )
             yield ToolPanel(id="tools")
         yield Static("", id="status")
